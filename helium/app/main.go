@@ -78,6 +78,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+	fmt.Println("Max Slots", params.MaxSlots())
 
 	// the matrix size
 	m := params.MaxSlots() / 2
@@ -104,16 +105,20 @@ func main() {
 		// It returns a channel to send circuit descriptors (evaluation requests) and a channel to
 		// receive the evaluation outputs.
 		hsv, cdescs, outs, err := helium.RunHeliumServer(ctx, nc, nl, app, compute.NoInput)
+
 		if err != nil {
 			log.Fatalf("error running helium server: %v", err)
 		}
 		timeSetup = time.Since(start)
+		fmt.Println("Time Setup", timeSetup)
 
-		// One the setup has completed, the collectice public key is available
+		// One the setup has completed, the collective public key is available
 		// and the test matrix can be encrypted with it.
 		if err := encryptTestMatrix(ctx, a, params, hsv, hsv); err != nil {
 			log.Fatalf("error encrypting test matrix: %v", err)
 		}
+
+		fmt.Println("Encrypted test matrix")
 
 		start = time.Now()
 		// sends *expRounds evaluation requests to the server for circuit "matmul4-dec".
@@ -121,21 +126,39 @@ func main() {
 			var nSig int
 			for i := 0; i < *expRounds; i++ {
 				cdescs <- circuits.Descriptor{
-					Signature:   circuits.Signature{Name: "matmul4-dec"},
-					CircuitID:   sessions.CircuitID(fmt.Sprintf("matmul-%d", nSig)),
+					Signature:   circuits.Signature{Name: "vecadd4-dec"},
+					CircuitID:   sessions.CircuitID(fmt.Sprintf("vecadd-%d", nSig)),
+					// Signature:   circuits.Signature{Name: "matmul4-dec"},
+					// CircuitID:   sessions.CircuitID(fmt.Sprintf("matmul-%d", nSig)),
 					NodeMapping: nodeMapping,
 					Evaluator:   "cloud",
 				}
 				nSig++
+				fmt.Println("Sent", nSig)
 			}
 			close(cdescs)
 		}()
 
 		// the cloud is not supposed to receive any output
-		out, has := <-outs
-		if has {
-			log.Fatalf("unexpected output: %v", out.OperandLabel)
+		out, hasOut := <-outs
+		// Log output
+		fmt.Printf("Has output", hasOut)
+		if hasOut {
+			encoder := bgv.NewEncoder(params)
+			pt := &rlwe.Plaintext{Element: out.Ciphertext.Element, Value: out.Ciphertext.Value[0]}
+			pt.IsBatched = true
+			res := make([]uint64, params.MaxSlots())
+			err := encoder.Decode(pt, res)
+			if err != nil {
+				log.Fatalf("%s | [main] error decoding output: %v\n", nc.ID, err)
+			}
+			res = res[:m]
+			if err != nil {
+				log.Fatalf("%s | [main] error decoding output: %v\n", nc.ID, err)
+			}
+			fmt.Printf("%v\n", res)
 		}
+		
 
 		hsv.GracefulStop() // waits for the last client to disconnect
 		timeCompute = time.Since(start)
@@ -202,6 +225,11 @@ func genNodeLists(nParty int, cloudAddr string) (nids []sessions.NodeID, nl node
 		sessions.NodeID
 		node.Address
 	}{NodeID: "cloud", Address: node.Address(cloudAddr)})
+	// Print out the nodeMapping map
+	for k, v := range nodeMapping {
+		fmt.Printf("Key: %s, Value: %s\n", k, v)
+	}
+
 	return
 }
 
@@ -211,6 +239,8 @@ func genConfigForNode(nid sessions.NodeID, nids []sessions.NodeID, threshold int
 	sessParams := sessions.Parameters{
 		ID:            "test-session",
 		Nodes:         nids,
+		//FHEParameters: bgv.ParametersLiteral{PlaintextModulus: 65537, LogN: 14, LogQ: []int{56, 55, 55, 54, 54, 54}, LogP: []int{55, 55}},
+		//TODO: Test other parameters when not creating the encrypted matrix.
 		FHEParameters: bgv.ParametersLiteral{PlaintextModulus: 79873, LogN: 12, LogQ: []int{45, 45}, LogP: []int{19}},
 		Threshold:     threshold,
 		PublicSeed:    []byte{'c', 'r', 's'},
@@ -260,7 +290,8 @@ func getApp(params bgv.Parameters, m int) node.App {
 			Gks: maps.Values(diagGalEl),
 		},
 		Circuits: map[circuits.Name]circuits.Circuit{
-			"matmul4-dec": matmul4dec,
+			//"matmul4-dec": matmul4dec,
+			"vecadd4-dec": vecadd4dec,
 		},
 	}
 }
@@ -272,12 +303,13 @@ func getInputProvider(params bgv.Parameters, encoder *bgv.Encoder, m int) comput
 
 		encoder := encoder.ShallowCopy()
 
+		// Creates a vector of size m with the first element set to 1, the rest to 0.
 		var pt *rlwe.Plaintext
 		b := mat.NewVecDense(m, nil)
 		b.SetVec(0, 1)
 		data := make([]uint64, len(b.RawVector().Data))
-		for i, bi := range b.RawVector().Data {
-			data[i] = uint64(bi)
+		for i, _ := range b.RawVector().Data {
+			data[i] = uint64(i)
 		}
 
 		pt = bgv.NewPlaintext(params, params.MaxLevelQ())
@@ -373,47 +405,85 @@ func encryptTestMatrix(ctx context.Context, a *mat.Dense, params bgv.Parameters,
 	return nil
 }
 
-// matmul4dec is a circuit that computes the encrypted matrix-vector product followed by a collective decryption.
-func matmul4dec(e circuits.Runtime) error {
-	params := e.Parameters().(bgv.Parameters)
+// //matmul4dec is a circuit that computes the encrypted matrix-vector product followed by a collective decryption.
+// func matmul4dec(e circuits.Runtime) error {
+// 	params := e.Parameters().(bgv.Parameters)
 
-	m := params.MaxSlots() / 2
+// 	m := params.MaxSlots() / 2
 
-	vecOp := e.Input(circuits.OperandLabel("//node-0/vec"))
+// 	vecOp := e.Input(circuits.OperandLabel("//node-0/vec"))
 
-	matOps := make(map[int]*circuits.Operand)
-	diagGalEl := make(map[int]uint64)
-	for k := 0; k < m; k++ {
-		matOps[k] = e.Load(circuits.OperandLabel(fmt.Sprintf("//cloud/mat-diag-%d", k)))
-		diagGalEl[k] = params.GaloisElement(k)
+// 	matOps := make(map[int]*circuits.Operand)
+// 	diagGalEl := make(map[int]uint64)
+// 	for k := 0; k < m; k++ {
+// 		matOps[k] = e.Load(circuits.OperandLabel(fmt.Sprintf("//cloud/mat-diag-%d", k)))
+// 		diagGalEl[k] = params.GaloisElement(k)
+// 	}
+
+// 	opRes := e.NewOperand("//cloud/res-0")
+// 	if err := e.EvalLocal(true, maps.Values(diagGalEl), func(e he.Evaluator) error {
+// 		opRes.Ciphertext = bgv.NewCiphertext(params, 1, params.MaxLevel())
+
+// 		eval, isBgv := e.(*bgv.Evaluator)
+// 		if !isBgv {
+// 			return fmt.Errorf("evaluator is not a *bgv.Evaluator, is %T", e)
+// 		}
+// 		eval.DecomposeNTT(params.MaxLevelQ(), params.MaxLevelP(), params.PCount(), vecOp.Get().Value[1], true, eval.BuffDecompQP)
+// 		vecRotated := bgv.NewCiphertext(params, 1, params.MaxLevelQ())
+// 		ctprod := bgv.NewCiphertext(params, 2, params.MaxLevel())
+// 		for di, d := range matOps {
+// 			if err := eval.AutomorphismHoisted(vecOp.LevelQ(), vecOp.Ciphertext, eval.BuffDecompQP, diagGalEl[di], vecRotated); err != nil {
+// 				return err
+// 			}
+// 			if err := e.MulThenAdd(vecRotated, d.Ciphertext, ctprod); err != nil {
+// 				return err
+// 			}
+// 		}
+// 		return e.Relinearize(ctprod, opRes.Ciphertext)
+// 	}); err != nil {
+// 		return err
+// 	}
+
+// 	return e.DEC(*opRes, "node-0", map[string]string{
+// 		"smudging": "40.0",
+// 	})
+// }
+
+
+func vecadd4dec(rt circuits.Runtime) error {
+	//TODO: Possible to make this parameterized?
+	nodeCount := 4
+	fmt.Println("Running vecadd4dec")
+	inputs := make(map[int]*circuits.FutureOperand)
+	
+	for i := 0; i < nodeCount; i++ {
+		inputs[i] = rt.Input(circuits.OperandLabel(fmt.Sprintf("//node-%d/vec", i)))
 	}
 
-	opRes := e.NewOperand("//cloud/res-0")
-	if err := e.EvalLocal(true, maps.Values(diagGalEl), func(e he.Evaluator) error {
-		opRes.Ciphertext = bgv.NewCiphertext(params, 1, params.MaxLevel())
+	fmt.Println("Number of inputs", len(inputs))
+	// computes the addition of all inputs
+	opRes := rt.NewOperand("//cloud/res-0")
+	if err := rt.EvalLocal(true, nil, func(eval he.Evaluator) error {
+		var sum *rlwe.Ciphertext
+		var err error
+		sum = inputs[0].Get().Ciphertext
+		for i := 1; i < nodeCount; i++ {
+			fmt.Println("Adding", i)
+			if sum, err = eval.AddNew(sum, inputs[i].Get().Ciphertext); err != nil {
+				return err
+			}
+		}
+		opRes.Ciphertext = sum
+		return err
 
-		eval, isBgv := e.(*bgv.Evaluator)
-		if !isBgv {
-			return fmt.Errorf("evaluator is not a *bgv.Evaluator, is %T", e)
-		}
-		eval.DecomposeNTT(params.MaxLevelQ(), params.MaxLevelP(), params.PCount(), vecOp.Get().Value[1], true, eval.BuffDecompQP)
-		vecRotated := bgv.NewCiphertext(params, 1, params.MaxLevelQ())
-		ctprod := bgv.NewCiphertext(params, 2, params.MaxLevel())
-		for di, d := range matOps {
-			if err := eval.AutomorphismHoisted(vecOp.LevelQ(), vecOp.Ciphertext, eval.BuffDecompQP, diagGalEl[di], vecRotated); err != nil {
-				return err
-			}
-			if err := e.MulThenAdd(vecRotated, d.Ciphertext, ctprod); err != nil {
-				return err
-			}
-		}
-		return e.Relinearize(ctprod, opRes.Ciphertext)
 	}); err != nil {
 		return err
 	}
 
-	return e.DEC(*opRes, "node-0", map[string]string{
-		"smudging": "40.0",
+	// decrypts the result with result receiver id "rec". The node id can be a place-holder and the actual id is provided
+	// when querying for a circuit's execution.
+	return rt.DEC(*opRes, "cloud", map[string]string{
+		"smudging": "40.0", // use 40 bits of smudging.
 	})
 }
 

@@ -100,6 +100,8 @@ for i, (exp, rep) in enumerate(product(exps_to_run, range(N_REP))):
     cloud = system.start_cloud()
 
     churn_sim.run_simulation()
+
+    print("Waiting for cloud to terminate...")
     
     try:
         stats = get_stats(cloud, print=True)

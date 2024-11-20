@@ -20,6 +20,7 @@ import (
 
 const buffConBufferSize = 65 * 1024 * 1024
 
+//TODO: Adapt test to new benchmark.
 func TestApp(t *testing.T) {
 
 	nParty := 4

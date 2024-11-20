@@ -21,11 +21,13 @@ DELAY = "30ms"         # outbound network delay for the parties
 EVAL_COUNT = 10        # number of circuit evaluation performed per experiment
 
 # ====== Experiment Grid ======
-N_PARTIES = [7]                         # the number of session nodes
-THRESH_VALUES = [3,4]                   # the cryptographic threshold
-FAILURE_RATES = range(0, 11, 5)         # the failure rate in fail/min
-FAILURE_DURATIONS = [0.333333333333]    # the mean failure duration in min
-N_REP = 1                               # number of experiment repetition
+N_PARTIES = [100]  # the number of session nodes
+THRESH_VALUES = [100]  # the cryptographic threshold
+FAILURE_RATES = [0]  # the failure rate in fail/min
+FAILURE_DURATIONS = [
+    0.1
+]  # the mean failure duration in min, cannot be zero (zero division in the simulation)
+N_REP = 2  # number of experiment repetition
 SKIP_TO = 0                             # starts from a specific experiment number in the grid
 
 
@@ -70,7 +72,7 @@ for i, (exp, rep) in enumerate(product(exps_to_run, range(N_REP))):
 
     if i+1 < SKIP_TO:
         continue
-    
+
     n_party, thresh, mean_failure_per_min, mean_failure_duration = exp
 
     log("======= starting experiment N=%d T=%d F=%.2f REP=%d =======" % (n_party, thresh, mean_failure_per_min, rep))
@@ -85,7 +87,7 @@ for i, (exp, rep) in enumerate(product(exps_to_run, range(N_REP))):
                                     on_reconnect=system.start_player,
                                     initial_online= thresh if START_WITH_THRESH else None
                                     )
-    
+
     time.sleep(5) # lets the thing clean
 
     exp_terminated = threading.Event()
@@ -94,15 +96,13 @@ for i, (exp, rep) in enumerate(product(exps_to_run, range(N_REP))):
         time.sleep(2)
         if not exp_terminated.is_set():
             raise Exception("Got exception of type %s value %s during experiment" % (args.exc_type, args.exc_value))
-    
+
     threading.excepthook = excepthook
 
     cloud = system.start_cloud()
 
     churn_sim.run_simulation()
 
-    print("Waiting for cloud to terminate...")
-    
     try:
         stats = get_stats(cloud, print=True)
         exp_desc = OrderedDict(

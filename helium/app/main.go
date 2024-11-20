@@ -26,6 +26,9 @@ import (
 
 // cloudAddress is the local address that the cloud node listens on.
 const cloudAddress = ":40000"
+
+// TODO: Possible to make this parameterized without a global variable?
+// helper global variable to dynamically set the number of input nodes in the circuit.
 var nInputNodes int = 0
 
 // defines the command-line flags
@@ -80,15 +83,14 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println("Max Slots", params.MaxSlots())
 
-	// the matrix size
-	m := params.MaxSlots()
+	// the maximum number of slots in a plaintext and length of the vectors
+	v := params.MaxSlots()
 
 	// generates the Helium application (see helium/node/app.go).
-	// The app declares a circuit "matmul4-dec" that computes the
-	// encrypted matrix-vector product followed by a collective
-	// decryption.
+	// The app declares a circuit "vecadd-dec" that computes the
+	// sum of encrypted vectors from each node followed by 
+	// a collective decryption.
 	app := getApp(params)
 
 	// creates a context for the session
@@ -100,7 +102,7 @@ func main() {
 	start := time.Now()
 	if nc.ID == "cloud" {
 
-		// runs the Helium server. The method returns when the setup phase has completed.
+		// Runs the Helium server. The method returns when the setup phase has completed.
 		// It returns a channel to send circuit descriptors (evaluation requests) and a channel to
 		// receive the evaluation outputs.
 		hsv, cdescs, outs, err := helium.RunHeliumServer(ctx, nc, nl, app, compute.NoInput)
@@ -108,22 +110,22 @@ func main() {
 		if err != nil {
 			log.Fatalf("error running helium server: %v", err)
 		}
+
 		timeSetup = time.Since(start)
 		fmt.Println("Time Setup", timeSetup)
 
 		start = time.Now()
-		// sends *expRounds evaluation requests to the server for circuit "vecadd4-dec".
+		// sends *expRounds evaluation requests to the server for circuit "vecadd-dec".
 		go func() {
 			var nSig int
 			for i := 0; i < *expRounds; i++ {
 				cdescs <- circuits.Descriptor{
-					Signature:   circuits.Signature{Name: "vecadd4-dec"},
+					Signature:   circuits.Signature{Name: "vecadd-dec"},
 					CircuitID:   sessions.CircuitID(fmt.Sprintf("vecadd-%d", nSig)),
 					NodeMapping: nodeMapping,
 					Evaluator:   "cloud",
 				}
 				nSig++
-				fmt.Println("Sent", nSig)
 			}
 			close(cdescs)
 		}()
@@ -135,18 +137,20 @@ func main() {
 			pt := &rlwe.Plaintext{Element: out.Ciphertext.Element, Value: out.Ciphertext.Value[0]}
 			pt.IsBatched = true
 			res := make([]uint64, params.MaxSlots())
+
 			err := encoder.Decode(pt, res)
 			if err != nil {
 				log.Fatalf("%s | [main] error decoding output: %v\n", nc.ID, err)
 			}
-			res = res[:m]
 			if err != nil {
 				log.Fatalf("%s | [main] error decoding output: %v\n", nc.ID, err)
 			}
 			fmt.Printf("%v\n", res)
-		}
 
-		// TODO: Add result check.
+			if err := checkResultCorrect(params, encoder, out); err != nil {
+				log.Fatalf("error checking result: %v", err)
+			}
+		}
 
 		hsv.GracefulStop() // waits for the last client to disconnect
 		timeCompute = time.Since(start)
@@ -161,7 +165,7 @@ func main() {
 
 		// creates an input provider function for the node (see getInputProvider).
 		encoder := bgv.NewEncoder(params)
-		var ip compute.InputProvider = getInputProvider(params, encoder, m)
+		var ip compute.InputProvider = getInputProvider(params, encoder, v)
 
 		// runs the Helium client. The method returns a channel to receive the evaluation outputs
 		// for which the node is the receiver.
@@ -219,7 +223,7 @@ func genConfigForNode(nid sessions.NodeID, nids []sessions.NodeID, threshold int
 		ID:            "test-session",
 		Nodes:         nids,
 		//FHEParameters: bgv.ParametersLiteral{PlaintextModulus: 65537, LogN: 14, LogQ: []int{56, 55, 55, 54, 54, 54}, LogP: []int{55, 55}},
-		//TODO: Test other parameters when not creating the encrypted matrix.
+		//Gives panic: runtime error: index out of range [4096] with length 4096, works on helium example. TODO: Find other parameters.
 		FHEParameters: bgv.ParametersLiteral{PlaintextModulus: 79873, LogN: 12, LogQ: []int{45, 45}, LogP: []int{19}},
 		Threshold:     threshold,
 		PublicSeed:    []byte{'c', 'r', 's'},
@@ -265,7 +269,7 @@ func getApp(params bgv.Parameters) node.App {
 			Gks: []uint64{},
 		},
 		Circuits: map[circuits.Name]circuits.Circuit{
-			"vecadd4-dec": vecadd4dec,
+			"vecadd-dec": vecAddDec,
 		},
 	}
 }
@@ -299,49 +303,40 @@ func getInputProvider(params bgv.Parameters, encoder *bgv.Encoder, m int) comput
 	}
 }
 
-//TODO: Add own result check.
-// checkResultCorrect checks if the result of the circuit evaluation is correct by computing the matrix-vector product.
-// func checkResultCorrect(params bgv.Parameters, encoder bgv.Encoder, out circuits.Output, a *mat.Dense) error {
-// 	_, m := a.Dims()
+// checkResultCorrect checks if the result of the circuit evaluation is correct by computing the sum of all input vectors.
+func checkResultCorrect(params bgv.Parameters, encoder *bgv.Encoder, out circuits.Output) error {
+	dataWant := make([]uint64, params.MaxSlots())
+	for i := range dataWant {
+		dataWant[i] = (uint64(i) * uint64(nInputNodes)) % params.PlaintextModulus()
+	}
 
-// 	b := mat.NewVecDense(m, nil)
-// 	b.SetVec(0, 1)
-// 	r := mat.NewVecDense(m, nil)
+	pt := &rlwe.Plaintext{Element: out.Ciphertext.Element, Value: out.Ciphertext.Value[0]}
+	pt.IsBatched = true
+	res := make([]uint64, params.MaxSlots())
+	if err := encoder.Decode(pt, res); err != nil {
+		return fmt.Errorf("error decoding result: %v", err)
+	}
 
-// 	r.MulVec(a, b)
-// 	dataWant := make([]uint64, len(r.RawVector().Data))
-// 	for i, v := range r.RawVector().Data {
-// 		dataWant[i] = uint64(v)
-// 	}
+	for i, v := range res {
+		if v != dataWant[i] {
+			return fmt.Errorf("incorrect result for %s: \n has %v, want %v\n", out.OperandLabel, res, dataWant)
+		}
+	}
+	return nil
+}
 
-// 	pt := &rlwe.Plaintext{Element: out.Ciphertext.Element, Value: out.Ciphertext.Value[0]}
-// 	pt.IsBatched = true
-// 	res := make([]uint64, params.MaxSlots())
-// 	if err := encoder.Decode(pt, res); err != nil {
-// 		return fmt.Errorf("error decoding result: %v", err)
-// 	}
-// 	res = res[:m]
 
-// 	for i, v := range res {
-// 		if v != dataWant[i] {
-// 			return fmt.Errorf("incorrect result for %s: \n has %v, want %v\n", out.OperandLabel, res, dataWant)
-// 		}
-// 	}
-// 	return nil
-// }
+func vecAddDec(rt circuits.Runtime) error {
 
-func vecadd4dec(rt circuits.Runtime) error {
 	//TODO: Possible to make this parameterized without a global variable? / Obtain this information from Runtime?
 	nodeCount := nInputNodes
-	fmt.Println("Running vecadd4dec")
 	inputs := make(map[int]*circuits.FutureOperand)
 	
 	for i := 0; i < nodeCount; i++ {
 		inputs[i] = rt.Input(circuits.OperandLabel(fmt.Sprintf("//node-%d/vec", i)))
 	}
 
-	fmt.Println("Number of inputs", len(inputs))
-	// computes the addition of all inputs
+	// computes the addition of all input vectors
 	opRes := rt.NewOperand("//cloud/res-0")
 	if err := rt.EvalLocal(true, nil, func(eval he.Evaluator) error {
 		var sum *rlwe.Ciphertext

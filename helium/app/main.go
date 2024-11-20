@@ -27,6 +27,7 @@ import (
 
 // cloudAddress is the local address that the cloud node listens on.
 const cloudAddress = ":40000"
+var nInputNodes int = 0
 
 // defines the command-line flags
 var (
@@ -52,6 +53,8 @@ func main() {
 	if len(*cloudAddr) == 0 {
 		panic("cloud_address argument must be provided for session nodes")
 	}
+
+	nInputNodes = *nParty - 1
 
 	// sets the threshold to the number of parties if not provided
 	var threshold int
@@ -451,8 +454,8 @@ func encryptTestMatrix(ctx context.Context, a *mat.Dense, params bgv.Parameters,
 
 
 func vecadd4dec(rt circuits.Runtime) error {
-	//TODO: Possible to make this parameterized?
-	nodeCount := 4
+	//TODO: Possible to make this parameterized without a global variable? / Obtain this information from Runtime?
+	nodeCount := nInputNodes
 	fmt.Println("Running vecadd4dec")
 	inputs := make(map[int]*circuits.FutureOperand)
 	

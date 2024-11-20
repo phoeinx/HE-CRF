@@ -19,7 +19,6 @@ import (
 	"github.com/tuneinsight/lattigo/v5/he"
 	"github.com/tuneinsight/lattigo/v5/mhe"
 	"github.com/tuneinsight/lattigo/v5/schemes/bgv"
-	"golang.org/x/exp/maps"
 	"gonum.org/v1/gonum/mat"
 
 	"github.com/ChristianMct/helium/node"
@@ -87,7 +86,7 @@ func main() {
 	m := params.MaxSlots() / 2
 
 	// generates a test matrix
-	a := genTestMatrix(m)
+	// a := genTestMatrix(m)
 
 	// generates the Helium application (see helium/node/app.go).
 	// The app declares a circuit "matmul4-dec" that computes the
@@ -117,9 +116,9 @@ func main() {
 
 		// One the setup has completed, the collective public key is available
 		// and the test matrix can be encrypted with it.
-		if err := encryptTestMatrix(ctx, a, params, hsv, hsv); err != nil {
-			log.Fatalf("error encrypting test matrix: %v", err)
-		}
+		// if err := encryptTestMatrix(ctx, a, params, hsv, hsv); err != nil {
+		// 	log.Fatalf("error encrypting test matrix: %v", err)
+		// }
 
 		fmt.Println("Encrypted test matrix")
 
@@ -186,12 +185,18 @@ func main() {
 		}
 
 		// checks the results
-		for out := range outs {
-			if err = checkResultCorrect(params, *encoder, out, a); err != nil {
-				log.Printf("error checking result: %v", err)
-			} else {
-				log.Printf("got correct result for %s", out.OperandLabel)
-			}
+		// for out := range outs {
+		// 	if err = checkResultCorrect(params, *encoder, out, a); err != nil {
+		// 		log.Printf("error checking result: %v", err)
+		// 	} else {
+		// 		log.Printf("got correct result for %s", out.OperandLabel)
+		// 	}
+		// }
+
+		out, hasOut := <-outs
+
+		if hasOut {
+			log.Fatalf("Node %s received output: %v", nc.ID, out)
 		}
 
 		if err := hc.Close(); err != nil {
@@ -282,15 +287,16 @@ func genConfigForNode(nid sessions.NodeID, nids []sessions.NodeID, threshold int
 // getApp generates the Helium application for the test.
 // The application specifies the setup phase and declares the circuits that can be executed by the nodes.
 func getApp(params bgv.Parameters, m int) node.App {
-	diagGalEl := make(map[int]uint64)
-	for k := 0; k < m; k++ {
-		diagGalEl[k] = params.GaloisElement(k)
-	}
+	// diagGalEl := make(map[int]uint64)
+	// for k := 0; k < m; k++ {
+	// 	diagGalEl[k] = params.GaloisElement(k)
+	// }
 	return node.App{
 		SetupDescription: &setup.Description{
 			Cpk: true,
 			Rlk: true,
-			Gks: maps.Values(diagGalEl),
+			//Gks: maps.Values(diagGalEl),
+			Gks: []uint64{},
 		},
 		Circuits: map[circuits.Name]circuits.Circuit{
 			//"matmul4-dec": matmul4dec,
@@ -307,6 +313,7 @@ func getInputProvider(params bgv.Parameters, encoder *bgv.Encoder, m int) comput
 		encoder := encoder.ShallowCopy()
 
 		// Creates a vector of size m with the first element set to 1, the rest to 0.
+		// TODO: Necessary?
 		var pt *rlwe.Plaintext
 		b := mat.NewVecDense(m, nil)
 		b.SetVec(0, 1)
@@ -328,85 +335,85 @@ func getInputProvider(params bgv.Parameters, encoder *bgv.Encoder, m int) comput
 }
 
 // checkResultCorrect checks if the result of the circuit evaluation is correct by computing the matrix-vector product.
-func checkResultCorrect(params bgv.Parameters, encoder bgv.Encoder, out circuits.Output, a *mat.Dense) error {
-	_, m := a.Dims()
+// func checkResultCorrect(params bgv.Parameters, encoder bgv.Encoder, out circuits.Output, a *mat.Dense) error {
+// 	_, m := a.Dims()
 
-	b := mat.NewVecDense(m, nil)
-	b.SetVec(0, 1)
-	r := mat.NewVecDense(m, nil)
+// 	b := mat.NewVecDense(m, nil)
+// 	b.SetVec(0, 1)
+// 	r := mat.NewVecDense(m, nil)
 
-	r.MulVec(a, b)
-	dataWant := make([]uint64, len(r.RawVector().Data))
-	for i, v := range r.RawVector().Data {
-		dataWant[i] = uint64(v)
-	}
+// 	r.MulVec(a, b)
+// 	dataWant := make([]uint64, len(r.RawVector().Data))
+// 	for i, v := range r.RawVector().Data {
+// 		dataWant[i] = uint64(v)
+// 	}
 
-	pt := &rlwe.Plaintext{Element: out.Ciphertext.Element, Value: out.Ciphertext.Value[0]}
-	pt.IsBatched = true
-	res := make([]uint64, params.MaxSlots())
-	if err := encoder.Decode(pt, res); err != nil {
-		return fmt.Errorf("error decoding result: %v", err)
-	}
-	res = res[:m]
+// 	pt := &rlwe.Plaintext{Element: out.Ciphertext.Element, Value: out.Ciphertext.Value[0]}
+// 	pt.IsBatched = true
+// 	res := make([]uint64, params.MaxSlots())
+// 	if err := encoder.Decode(pt, res); err != nil {
+// 		return fmt.Errorf("error decoding result: %v", err)
+// 	}
+// 	res = res[:m]
 
-	for i, v := range res {
-		if v != dataWant[i] {
-			return fmt.Errorf("incorrect result for %s: \n has %v, want %v\n", out.OperandLabel, res, dataWant)
-		}
-	}
-	return nil
-}
+// 	for i, v := range res {
+// 		if v != dataWant[i] {
+// 			return fmt.Errorf("incorrect result for %s: \n has %v, want %v\n", out.OperandLabel, res, dataWant)
+// 		}
+// 	}
+// 	return nil
+// }
 
 // genTestMatrix generates a test secret matrix of size mxm for the experiment.
-func genTestMatrix(m int) *mat.Dense {
-	a := mat.NewDense(m, m, nil)
-	a.Apply(func(i, j int, v float64) float64 {
-		return float64(i) + float64(2*j)
-	}, a)
-	return a
-}
+// func genTestMatrix(m int) *mat.Dense {
+// 	a := mat.NewDense(m, m, nil)
+// 	a.Apply(func(i, j int, v float64) float64 {
+// 		return float64(i) + float64(2*j)
+// 	}, a)
+// 	return a
+// }
 
 // encryptTestMatrix encrypts the test matrix with the collective public key of the session, and
 // stores the encrypted matrix in the operand provider.
-func encryptTestMatrix(ctx context.Context, a *mat.Dense, params bgv.Parameters, pkb circuits.PublicKeyProvider, opp compute.OperandProvider) error {
+// func encryptTestMatrix(ctx context.Context, a *mat.Dense, params bgv.Parameters, pkb circuits.PublicKeyProvider, opp compute.OperandProvider) error {
 
-	cpk, err := pkb.GetCollectivePublicKey(ctx)
-	if err != nil {
-		return err
-	}
-	encryptor := bgv.NewEncryptor(params, cpk)
-	encoder := bgv.NewEncoder(params)
+// 	cpk, err := pkb.GetCollectivePublicKey(ctx)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	encryptor := bgv.NewEncryptor(params, cpk)
+// 	encoder := bgv.NewEncoder(params)
 
-	pta := make(map[int]*rlwe.Plaintext)
-	cta := make(map[int]*rlwe.Ciphertext)
+// 	pta := make(map[int]*rlwe.Plaintext)
+// 	cta := make(map[int]*rlwe.Ciphertext)
 
-	_, m := a.Dims()
-	diag := make(map[int][]uint64, m)
-	for k := 0; k < m; k++ {
-		diag[k] = make([]uint64, m)
-		for i := 0; i < m; i++ {
-			j := (i + k) % m
-			diag[k][i] = uint64(a.At(i, j))
-		}
-	}
+// 	_, m := a.Dims()
+// 	diag := make(map[int][]uint64, m)
+// 	for k := 0; k < m; k++ {
+// 		diag[k] = make([]uint64, m)
+// 		for i := 0; i < m; i++ {
+// 			j := (i + k) % m
+// 			diag[k][i] = uint64(a.At(i, j))
+// 		}
+// 	}
 
-	log.Printf("generating encrypted matrix...")
-	for di, d := range diag {
-		pta[di] = bgv.NewPlaintext(params, params.MaxLevelQ())
-		if err = encoder.Encode(d, pta[di]); err != nil {
-			return err
-		}
-		if cta[di], err = encryptor.EncryptNew(pta[di]); err != nil {
-			return err
-		}
-		op := &circuits.Operand{Ciphertext: cta[di], OperandLabel: circuits.OperandLabel(fmt.Sprintf("//cloud/mat-diag-%d", di))}
-		if err := opp.PutOperand(op.OperandLabel, op); err != nil {
-			return err
-		}
-	}
-	log.Printf("done")
-	return nil
-}
+// 	log.Printf("generating encrypted matrix...")
+// 	for di, d := range diag {
+// 		pta[di] = bgv.NewPlaintext(params, params.MaxLevelQ())
+// 		if err = encoder.Encode(d, pta[di]); err != nil {
+// 			return err
+// 		}
+// 		if cta[di], err = encryptor.EncryptNew(pta[di]); err != nil {
+// 			return err
+// 		}
+// 		op := &circuits.Operand{Ciphertext: cta[di], OperandLabel: circuits.OperandLabel(fmt.Sprintf("//cloud/mat-diag-%d", di))}
+// 		if err := opp.PutOperand(op.OperandLabel, op); err != nil {
+// 			return err
+// 		}
+// 	}
+// 	log.Printf("done")
+// 	return nil
+// }
 
 // //matmul4dec is a circuit that computes the encrypted matrix-vector product followed by a collective decryption.
 // func matmul4dec(e circuits.Runtime) error {

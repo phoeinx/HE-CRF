@@ -2,3 +2,4 @@
 .vscode
 *.pdf
 __pycache__
+results

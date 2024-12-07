@@ -21,7 +21,7 @@ DELAY = "30ms"         # outbound network delay for the parties
 EVAL_COUNT = 1  # number of circuit evaluation performed per experiment
 
 # ====== Experiment Grid ======
-N_PARTIES = [2, 5, 10, 50, 100, 200, 300]  # the number of session nodes
+N_PARTIES = [2, 5, 10, 50, 100]  # the number of session nodes
 THRESH_VALUES = [
     0.5,
     0.75,

@@ -1,5 +1,6 @@
 import docker
 import sys
+import time
 
 EXP_CONTAINER_LABEL = "helium-exp"
 
@@ -18,11 +19,7 @@ class DockerNodeSystem:
         self.circuit_rounds = circuit_rounds
         self.parties_host = parties_host
         self.cloud_host = cloud_host
-        self.parties_docker_host = docker.DockerClient(
-            base_url=host_to_docker_host_url(parties_host),
-            use_ssh_client=parties_host != "localhost",
-            timeout=300,
-        )
+        self.parties_docker_host = docker.DockerClient(base_url=host_to_docker_host_url(parties_host), use_ssh_client= parties_host != 'localhost', timeout=300,)
         self.cloud_docker_host = self.parties_docker_host if cloud_host == parties_host else docker.DockerClient(base_url=host_to_docker_host_url(cloud_host), use_ssh_client= cloud_host != 'localhost')
 
         self.clean_all()
@@ -37,7 +34,7 @@ class DockerNodeSystem:
                 ipam=docker.types.IPAMConfig(
                     pool_configs=[
                         docker.types.IPAMPool(
-                            subnet="192.168.1.0/16"  # Specify your new, larger subnet
+                            subnet="192.168.1.0/16"
                         )
                     ]
                 ),
@@ -65,13 +62,17 @@ class DockerNodeSystem:
     def start_cloud(self):
         cmd = '-node_id cloud -n_party %d -threshold %d -cloud_address %s -expRounds %d' % (self.N, self.T, "%s:40000" % self.cloud_host, self.circuit_rounds)
         net = "expnet" if self.cloud_docker_host == self.parties_docker_host else "host"
-        # net = "host"
+        #net = "host"
+        cpu_quota = 50000  # Half a CPU
+        memory_limit = "512m"
         return self.cloud_docker_host.containers.run('exp:helium',
                                         name="cloud",
                                         hostname="cloud",
                                         command=cmd,
                                         network=net,
                                         labels=[EXP_CONTAINER_LABEL],
+                                        cpu_quota=cpu_quota,
+                                        mem_limit=memory_limit,
                                         detach=True)
 
     def create_player(self, i):
@@ -90,13 +91,6 @@ class DockerNodeSystem:
             network=net,
             environment=env,
             labels=[EXP_CONTAINER_LABEL],
-            # host_config={
-            #     # Resource constraints
-            #     "mem_limit": "1g",  # Limit memory to 512 MB
-            #     "memswap_limit": "2g",  # Limit total memory + swap to 1 GB
-            #     "cpu_quota": 50000,  # CPU quota in microseconds (50% of a single CPU)
-            #     "cpu_shares": 1024,  # Relative CPU weight (default: 1024)
-            # },
             detach=True,
         )
         log("created node-%d" % i)

@@ -10,7 +10,7 @@ from collections import OrderedDict
 
 # ====== Environment ======
 PARTIES_HOST = 'localhost'     # parties should always be run on localhost
-CLOUD_HOST = 'localhost'       # hostname or ip of the cloud docker host
+CLOUD_HOST = 'nx02'       # hostname or ip of the cloud docker host
 EPOCH_TIME = 1                 # time resolution of the failure process simulation
 START_WITH_THRESH = False # if true, starts with exactly the threshold number of nodes. Otherwise, starts with the expected number of node for the experiment's failure rate.
 EXP_SKIP_THRESH = 0.2 # experiments for which the expected time above threshold is below 20% are skipped
@@ -18,16 +18,16 @@ EXP_SKIP_THRESH = 0.2 # experiments for which the expected time above threshold 
 # ====== Experiments parameters ======
 RATE_LIMIT = "100mbit" # outbound rate limit for the parties
 DELAY = "30ms"         # outbound network delay for the parties
-EVAL_COUNT = 10        # number of circuit evaluation performed per experiment
+EVAL_COUNT = 1        # number of circuit evaluation performed per experiment
 
 # ====== Experiment Grid ======
-N_PARTIES = [100]  # the number of session nodes
-THRESH_VALUES = [100]  # the cryptographic threshold
+N_PARTIES = [200]  # the number of session nodes
+THRESH_VALUES = [200]  # the cryptographic threshold
 FAILURE_RATES = [0]  # the failure rate in fail/min
 FAILURE_DURATIONS = [
     0.1
 ]  # the mean failure duration in min, cannot be zero (zero division in the simulation)
-N_REP = 2  # number of experiment repetition
+N_REP = 1  # number of experiment repetition
 SKIP_TO = 0                             # starts from a specific experiment number in the grid
 
 

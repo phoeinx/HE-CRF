@@ -18,17 +18,31 @@ class DockerNodeSystem:
         self.circuit_rounds = circuit_rounds
         self.parties_host = parties_host
         self.cloud_host = cloud_host
-        self.parties_docker_host = docker.DockerClient(base_url=host_to_docker_host_url(parties_host), use_ssh_client= parties_host != 'localhost')
+        self.parties_docker_host = docker.DockerClient(
+            base_url=host_to_docker_host_url(parties_host),
+            use_ssh_client=parties_host != "localhost",
+            timeout=300,
+        )
         self.cloud_docker_host = self.parties_docker_host if cloud_host == parties_host else docker.DockerClient(base_url=host_to_docker_host_url(cloud_host), use_ssh_client= cloud_host != 'localhost')
-        
+
         self.clean_all()
         self.nodes = [self.create_player(i) for i in range(N)]
 
         nets = [net.name for net in self.parties_docker_host.networks.list(names=["expnet"])]
         if "expnet" not in nets:
             log("creating network")
-            self.parties_docker_host.networks.create("expnet", driver="bridge")
-        
+            self.parties_docker_host.networks.create(
+                "expnet",
+                driver="bridge",
+                ipam=docker.types.IPAMConfig(
+                    pool_configs=[
+                        docker.types.IPAMPool(
+                            subnet="192.168.1.0/16"  # Specify your new, larger subnet
+                        )
+                    ]
+                ),
+            )
+
         log("new docker system")
 
     def get_all(self):
@@ -51,7 +65,7 @@ class DockerNodeSystem:
     def start_cloud(self):
         cmd = '-node_id cloud -n_party %d -threshold %d -cloud_address %s -expRounds %d' % (self.N, self.T, "%s:40000" % self.cloud_host, self.circuit_rounds)
         net = "expnet" if self.cloud_docker_host == self.parties_docker_host else "host"
-        #net = "host"
+        # net = "host"
         return self.cloud_docker_host.containers.run('exp:helium',
                                         name="cloud",
                                         hostname="cloud",
@@ -67,18 +81,26 @@ class DockerNodeSystem:
         caps = ["NET_ADMIN"]
         net = "expnet"
         env = {"RATE_LIMIT": self.rate_limit, "DELAY": self.delay}
-        container =  self.parties_docker_host.containers.create('exp:helium',
-                                                name=container_name,
-                                                hostname=container_name,
-                                                entrypoint=cmd,
-                                                cap_add=caps,
-                                                network=net,
-                                                environment=env,
-                                                labels=[EXP_CONTAINER_LABEL],
-                                                detach=True)
+        container = self.parties_docker_host.containers.create(
+            "exp:helium",
+            name=container_name,
+            hostname=container_name,
+            entrypoint=cmd,
+            cap_add=caps,
+            network=net,
+            environment=env,
+            labels=[EXP_CONTAINER_LABEL],
+            # host_config={
+            #     # Resource constraints
+            #     "mem_limit": "1g",  # Limit memory to 512 MB
+            #     "memswap_limit": "2g",  # Limit total memory + swap to 1 GB
+            #     "cpu_quota": 50000,  # CPU quota in microseconds (50% of a single CPU)
+            #     "cpu_shares": 1024,  # Relative CPU weight (default: 1024)
+            # },
+            detach=True,
+        )
         log("created node-%d" % i)
         return container
-
 
     def start_player(self, i):
         self.nodes[i].start()

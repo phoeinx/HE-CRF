@@ -18,16 +18,20 @@ EXP_SKIP_THRESH = 0.2 # experiments for which the expected time above threshold 
 # ====== Experiments parameters ======
 RATE_LIMIT = "100mbit" # outbound rate limit for the parties
 DELAY = "30ms"         # outbound network delay for the parties
-EVAL_COUNT = 10        # number of circuit evaluation performed per experiment
+EVAL_COUNT = 1  # number of circuit evaluation performed per experiment
 
 # ====== Experiment Grid ======
-N_PARTIES = [100]  # the number of session nodes
-THRESH_VALUES = [100]  # the cryptographic threshold
+N_PARTIES = [2, 5, 10, 50, 100, 200, 300]  # the number of session nodes
+THRESH_VALUES = [
+    0.5,
+    0.75,
+    1,
+]  # the cryptographic threshold in percentage of the number of nodes
 FAILURE_RATES = [0]  # the failure rate in fail/min
 FAILURE_DURATIONS = [
     0.1
 ]  # the mean failure duration in min, cannot be zero (zero division in the simulation)
-N_REP = 2  # number of experiment repetition
+N_REP = 10  # number of experiment repetition
 SKIP_TO = 0                             # starts from a specific experiment number in the grid
 
 
@@ -59,13 +63,17 @@ def get_stats(container, print=False):
 log("Computing experiments...")
 exps_to_run = []
 for n_party, thresh, mean_failure_per_min, mean_failure_duration in product(N_PARTIES, THRESH_VALUES, FAILURE_RATES, FAILURE_DURATIONS):
-     if thresh == 0:
-         thresh = n_party
-     sim = NodeSystemSimulation(n_party, mean_failure_per_min, mean_failure_duration, EPOCH_TIME)
-     avg_online_count, frac_time_above_thresh = sim.expected_online_nodes(), sim.expected_time_above_threshold(thresh)
-     if frac_time_above_thresh < EXP_SKIP_THRESH:
-         continue
-     exps_to_run.append((n_party, thresh, mean_failure_per_min, mean_failure_duration))
+    thresh = round(n_party * thresh)
+    sim = NodeSystemSimulation(
+        n_party, mean_failure_per_min, mean_failure_duration, EPOCH_TIME
+    )
+    avg_online_count, frac_time_above_thresh = (
+        sim.expected_online_nodes(),
+        sim.expected_time_above_threshold(thresh),
+    )
+    if frac_time_above_thresh < EXP_SKIP_THRESH:
+        continue
+    exps_to_run.append((n_party, thresh, mean_failure_per_min, mean_failure_duration))
 log("%d experiments to run" % (len(exps_to_run)*N_REP))
 
 for i, (exp, rep) in enumerate(product(exps_to_run, range(N_REP))):

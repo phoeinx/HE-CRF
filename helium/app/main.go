@@ -19,7 +19,6 @@ import (
 	"github.com/tuneinsight/lattigo/v5/he"
 	"github.com/tuneinsight/lattigo/v5/mhe"
 	"github.com/tuneinsight/lattigo/v5/schemes/bgv"
-	"gonum.org/v1/gonum/mat"
 
 	"github.com/ChristianMct/helium/node"
 )
@@ -27,8 +26,6 @@ import (
 // cloudAddress is the local address that the cloud node listens on.
 const cloudAddress = ":40000"
 
-// TODO: Possible to make this parameterized without a global variable?
-// helper global variable to dynamically set the number of input nodes in the circuit.
 var nInputNodes int = 0
 
 // defines the command-line flags
@@ -145,7 +142,6 @@ func main() {
 			if err != nil {
 				log.Fatalf("%s | [main] error decoding output: %v\n", nc.ID, err)
 			}
-			fmt.Printf("%v\n", res)
 
 			if err := checkResultCorrect(params, encoder, out); err != nil {
 				log.Fatalf("error checking result: %v", err)
@@ -163,7 +159,6 @@ func main() {
 		}
 	} else {
 
-		// creates an input provider function for the node (see getInputProvider).
 		encoder := bgv.NewEncoder(params)
 		var ip compute.InputProvider = getInputProvider(params, encoder, v)
 
@@ -174,6 +169,7 @@ func main() {
 			log.Fatalf("error running helium client: %v", err)
 		}
 
+
 		out, hasOut := <-outs
 		if hasOut {
 			log.Fatalf("Node %s received output: %v", nc.ID, out)
@@ -182,6 +178,7 @@ func main() {
 		if err := hc.Close(); err != nil {
 			log.Fatalf("error closing helium client: %v", err)
 		}
+
 		stats = map[string]interface{}{
 			"net": hc.GetStats(),
 		}
@@ -265,7 +262,7 @@ func getApp(params bgv.Parameters) node.App {
 	return node.App{
 		SetupDescription: &setup.Description{
 			Cpk: true,
-			Rlk: true,
+			Rlk: true, //TODO: where does relinearization key become necessary? shouldn't
 			Gks: []uint64{},
 		},
 		Circuits: map[circuits.Name]circuits.Circuit{
@@ -280,14 +277,9 @@ func getInputProvider(params bgv.Parameters, encoder *bgv.Encoder, m int) comput
 	return func(ctx context.Context, ci sessions.CircuitID, ol circuits.OperandLabel, s sessions.Session) (any, error) {
 
 		encoder := encoder.ShallowCopy()
-
-		// Creates a vector of size m with the first element set to 1, the rest to 0.
-		// TODO: Necessary?
 		var pt *rlwe.Plaintext
-		b := mat.NewVecDense(m, nil)
-		b.SetVec(0, 1)
-		data := make([]uint64, len(b.RawVector().Data))
-		for i, _ := range b.RawVector().Data {
+		data := make([]uint64, m)
+		for i := range data {
 			data[i] = uint64(i)
 		}
 
@@ -328,7 +320,6 @@ func checkResultCorrect(params bgv.Parameters, encoder *bgv.Encoder, out circuit
 
 func vecAddDec(rt circuits.Runtime) error {
 
-	//TODO: Possible to make this parameterized without a global variable? / Obtain this information from Runtime?
 	nodeCount := nInputNodes
 	inputs := make(map[int]*circuits.FutureOperand)
 	

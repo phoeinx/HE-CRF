@@ -53,7 +53,8 @@ func main() {
 		panic("cloud_address argument must be provided for session nodes")
 	}
 
-	nInputNodes = *nParty - 1
+	nInputNodes = *nParty
+	fmt.Println("Node ID", *nodeId)
 
 	// sets the threshold to the number of parties if not provided
 	var threshold int
@@ -80,7 +81,8 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-
+	fmt.Println("n party", *nParty)
+	fmt.Println("threshold", threshold)
 	// the maximum number of slots in a plaintext and length of the vectors
 	v := params.MaxSlots()
 
@@ -98,12 +100,12 @@ func main() {
 	var stats map[string]interface{}
 	start := time.Now()
 	if nc.ID == "cloud" {
-
+		
 		// Runs the Helium server. The method returns when the setup phase has completed.
 		// It returns a channel to send circuit descriptors (evaluation requests) and a channel to
 		// receive the evaluation outputs.
 		hsv, cdescs, outs, err := helium.RunHeliumServer(ctx, nc, nl, app, compute.NoInput)
-
+		
 		if err != nil {
 			log.Fatalf("error running helium server: %v", err)
 		}
@@ -127,9 +129,8 @@ func main() {
 			close(cdescs)
 		}()
 
-		out, hasOut := <-outs
-
-		if hasOut {
+		for out := range outs {
+			fmt.Println("Node", nc.ID, "received output", out)
 			encoder := bgv.NewEncoder(params)
 			pt := &rlwe.Plaintext{Element: out.Ciphertext.Element, Value: out.Ciphertext.Value[0]}
 			pt.IsBatched = true
@@ -158,13 +159,18 @@ func main() {
 			"Net": hsv.GetStats(),
 		}
 	} else {
+		fmt.Println("Node", nc.ID, "running as client")
 
 		encoder := bgv.NewEncoder(params)
-		var ip compute.InputProvider = getInputProvider(params, encoder, v)
+		fmt.Println("NID", nid)
+		var ip compute.InputProvider = getInputProvider(params, encoder, v, nid)
+		secrets := loadSecrets(nc.SessionParameters[0], nid)
+		fmt.Println("Node", nc.ID, "running as client")
+		fmt.Println("Secrets", secrets)
 
 		// runs the Helium client. The method returns a channel to receive the evaluation outputs
 		// for which the node is the receiver.
-		hc, outs, err := helium.RunHeliumClient(ctx, nc, nl, app, ip)
+		hc, outs, err := helium.RunHeliumClient(ctx, nc, nl, secrets, app, ip)
 		if err != nil {
 			log.Fatalf("error running helium client: %v", err)
 		}
@@ -206,10 +212,11 @@ func genNodeLists(nParty int, cloudAddr string) (nids []sessions.NodeID, nl node
 		shamirPks[nids[i]] = mhe.ShamirPublicPoint(i + 1)
 		nodeMapping[string(nids[i])] = nids[i]
 	}
+	fmt.Println("Cloud Address", cloudAddr)
 	nl = append(nl, struct {
 		sessions.NodeID
 		node.Address
-	}{NodeID: "cloud", Address: node.Address(cloudAddr)})
+	}{NodeID: "cloud", Address: node.Address("cloud:40000")})
 	return
 }
 
@@ -243,16 +250,17 @@ func genConfigForNode(nid sessions.NodeID, nids []sessions.NodeID, threshold int
 	}
 
 	if nid == "cloud" {
-		nc.Address = cloudAddress
+		//nc.Address = node.Address(cloudAddress)
 		nc.SetupConfig.Protocols.MaxAggregation = 32
 		nc.ComputeConfig.Protocols.MaxAggregation = 32
-	} else {
-		var err error
-		nc.SessionParameters[0].Secrets, err = loadSecrets(sessParams, nid)
-		if err != nil {
-			log.Fatalf("could not load node's secrets: %s", err)
-		}
 	}
+	// } else {
+	// 	var err error
+	// 	nc.SessionParameters[0].Secrets, err = loadSecrets(sessParams, nid)
+	// 	if err != nil {
+	// 		log.Fatalf("could not load node's secrets: %s", err)
+	// 	}
+	// }
 	return
 }
 
@@ -262,7 +270,7 @@ func getApp(params bgv.Parameters) node.App {
 	return node.App{
 		SetupDescription: &setup.Description{
 			Cpk: true,
-			Rlk: true, //TODO: where does relinearization key become necessary? shouldn't
+			Rlk: false, //TODO: where does relinearization key become necessary? shouldn't
 			Gks: []uint64{},
 		},
 		Circuits: map[circuits.Name]circuits.Circuit{
@@ -273,8 +281,8 @@ func getApp(params bgv.Parameters) node.App {
 
 // getInputProvider generates an input provider function for the node. The input provider function
 // is registered to with the Helium node and is called by Helium to provide the input for the circuit evaluation.
-func getInputProvider(params bgv.Parameters, encoder *bgv.Encoder, m int) compute.InputProvider {
-	return func(ctx context.Context, ci sessions.CircuitID, ol circuits.OperandLabel, s sessions.Session) (any, error) {
+func getInputProvider(params bgv.Parameters, encoder *bgv.Encoder, m int, nodeID sessions.NodeID) compute.InputProvider {
+	return func(ctx context.Context, sess sessions.Session, cd circuits.Descriptor) (chan circuits.Input, error) {
 
 		encoder := encoder.ShallowCopy()
 		var pt *rlwe.Plaintext
@@ -290,7 +298,10 @@ func getInputProvider(params bgv.Parameters, encoder *bgv.Encoder, m int) comput
 			return nil, err
 		}
 
-		return pt, nil
+		inchan := make(chan circuits.Input, 1)
+		inchan <- circuits.Input{OperandLabel: circuits.OperandLabel(fmt.Sprintf("//%s/%s/in", nodeID, cd.CircuitID)), OperandValue: pt}
+		close(inchan)
+		return inchan, nil
 
 	}
 }
@@ -320,6 +331,7 @@ func checkResultCorrect(params bgv.Parameters, encoder *bgv.Encoder, out circuit
 
 func vecAddDec(rt circuits.Runtime) error {
 
+	fmt.Println("Running vecAddDec")
 	nodeCount := nInputNodes
 	inputs := make(map[int]*circuits.FutureOperand)
 	
@@ -329,7 +341,7 @@ func vecAddDec(rt circuits.Runtime) error {
 
 	// computes the addition of all input vectors
 	opRes := rt.NewOperand("//cloud/res-0")
-	if err := rt.EvalLocal(true, nil, func(eval he.Evaluator) error {
+	if err := rt.EvalLocal(false, nil, func(eval he.Evaluator) error {
 		var sum *rlwe.Ciphertext
 		var err error
 		sum = inputs[0].Get().Ciphertext
@@ -353,17 +365,26 @@ func vecAddDec(rt circuits.Runtime) error {
 }
 
 // simulates loading the secrets. In a real application, the secrets would be loaded from a secure storage.
-func loadSecrets(sp sessions.Parameters, nid sessions.NodeID) (secrets *sessions.Secrets, err error) {
+func loadSecrets(params sessions.Parameters, nid sessions.NodeID) node.SecretProvider {
 
-	ss, err := sessions.GenTestSecretKeys(sp)
-	if err != nil {
-		return nil, err
+	var sp node.SecretProvider = func(sid sessions.ID, nid sessions.NodeID) (*sessions.Secrets, error) {
+
+		if sid != params.ID {
+			return nil, fmt.Errorf("no secret for session %s", sid)
+		}
+
+		ss, err := sessions.GenTestSecretKeys(params)
+		if err != nil {
+			return nil, err
+		}
+
+		secrets, ok := ss[nid]
+		if !ok {
+			return nil, fmt.Errorf("node %s not in session", nid)
+		}
+
+		return secrets, nil
 	}
 
-	secrets, ok := ss[nid]
-	if !ok {
-		return nil, fmt.Errorf("node %s not in session", nid)
-	}
-
-	return
+	return sp
 }

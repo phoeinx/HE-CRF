@@ -32,11 +32,7 @@ class DockerNodeSystem:
                 "expnet",
                 driver="bridge",
                 ipam=docker.types.IPAMConfig(
-                    pool_configs=[
-                        docker.types.IPAMPool(
-                            subnet="192.168.1.0/16"
-                        )
-                    ]
+                    pool_configs=[docker.types.IPAMPool(subnet="192.168.0.0/16")]
                 ),
             )
 
@@ -62,7 +58,7 @@ class DockerNodeSystem:
     def start_cloud(self):
         cmd = '-node_id cloud -n_party %d -threshold %d -cloud_address %s -expRounds %d' % (self.N, self.T, "%s:40000" % self.cloud_host, self.circuit_rounds)
         net = "expnet" if self.cloud_docker_host == self.parties_docker_host else "host"
-        #net = "host"
+        # net = "host"
         cpu_quota = 50000  # Half a CPU
         memory_limit = "512m"
         return self.cloud_docker_host.containers.run('exp:helium',

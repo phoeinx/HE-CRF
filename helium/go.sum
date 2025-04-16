@@ -4,6 +4,8 @@ github.com/ALTree/bigfloat v0.2.0/go.mod h1:+NaH2gLeY6RPBPPQf4aRotPPStg+eXc8f9Za
 github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
 github.com/ChristianMct/helium v0.2.1 h1:z5+DSMBL+lrHVh8LJ9r+uzbJjtxfn3DPD8URKmYVQfY=
 github.com/ChristianMct/helium v0.2.1/go.mod h1:rmv8iBic97NZhEv4/ZnoKEeiQcu8qi+cSfCoVU3ZREo=
+github.com/ChristianMct/helium v0.2.2-0.20250409113301-4a11077a646e h1:UbPFKHhXuwAOkZUMKuPqvOSytlFTz53FpQd8o6E6twU=
+github.com/ChristianMct/helium v0.2.2-0.20250409113301-4a11077a646e/go.mod h1:rmv8iBic97NZhEv4/ZnoKEeiQcu8qi+cSfCoVU3ZREo=
 github.com/census-instrumentation/opencensus-proto v0.2.1/go.mod h1:f6KPmirojxKA12rnyqOA5BBL4O983OfeGPqjHWSTneU=
 github.com/cespare/xxhash/v2 v2.1.1/go.mod h1:VGX0DQ3Q6kWi7AoAeZDth3/j3BFtOZR5XLFGgcrjCOs=
 github.com/cespare/xxhash/v2 v2.2.0 h1:DC2CZ1Ep5Y4k3ZQ899DldepgrayRUGE6BBZ/cd9Cj44=

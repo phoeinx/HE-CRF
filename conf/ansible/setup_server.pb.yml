@@ -3,7 +3,7 @@
   become: true
   
   vars:
-    helium_art_repo: https://github.com/ChristianMct/helium-artifacts.git
+    helium_art_repo: https://github.com/phoeinx/helium-artifacts.git
 
   tasks:
     - name: Install aptitude
@@ -56,6 +56,7 @@
     - name: Clones Artifacts Repo
       ansible.builtin.git:
         repo: "{{ helium_art_repo }}"
+        version: dev
         dest: ./helium-artifacts
         recursive: yes
         update: yes

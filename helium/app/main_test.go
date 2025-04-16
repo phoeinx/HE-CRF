@@ -54,7 +54,7 @@ func TestApp(t *testing.T) {
 	}
 
 	m := params.MaxSlots() / 2
-	app := getApp(params, m)
+	app := getApp(params)
 	a := genTestMatrix(m)
 	encoder := bgv.NewEncoder(params) // TODO pass encoder in ip ?
 
@@ -77,6 +77,7 @@ func TestApp(t *testing.T) {
 					CircuitID:   sessions.CircuitID(fmt.Sprintf("matmul-%d", i)),
 					NodeMapping: nodeMapping,
 					Evaluator:   "cloud",
+					
 				}
 			}
 			close(cdescs)

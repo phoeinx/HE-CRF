@@ -73,16 +73,16 @@ func main() {
 	// generates a test node list from the command-line arguments
 	nids, nl, shamirPks, nodeMapping := genNodeLists(*nParty, *cloudAddr)
 
-	// generates a config for the node running this program
-	nc := genConfigForNode(nid, nids, threshold, shamirPks)
+	// generates a nodeConfig for the node running this program
+	nodeConfig := genConfigForNode(nid, nids, threshold, shamirPks)
 
 	// retreives the session parameters from the node config
-	params, err := bgv.NewParametersFromLiteral(nc.SessionParameters[0].FHEParameters.(bgv.ParametersLiteral))
+	params, err := bgv.NewParametersFromLiteral(nodeConfig.SessionParameters[0].FHEParameters.(bgv.ParametersLiteral))
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println("n party", *nParty)
-	fmt.Println("threshold", threshold)
+	fmt.Println("Running with", *nParty, "parties")
+	fmt.Println("and threshold", threshold)
 	// the maximum number of slots in a plaintext and length of the vectors
 	v := params.MaxSlots()
 
@@ -93,18 +93,18 @@ func main() {
 	app := getApp(params)
 
 	// creates a context for the session
-	ctx := sessions.NewBackgroundContext(nc.SessionParameters[0].ID)
+	ctx := sessions.NewBackgroundContext(nodeConfig.SessionParameters[0].ID)
 
 	// runs Helium as a server or client
 	var timeSetup, timeCompute time.Duration
 	var stats map[string]interface{}
 	start := time.Now()
-	if nc.ID == "cloud" {
+	if nodeConfig.ID == "cloud" {
 		
 		// Runs the Helium server. The method returns when the setup phase has completed.
 		// It returns a channel to send circuit descriptors (evaluation requests) and a channel to
 		// receive the evaluation outputs.
-		hsv, cdescs, outs, err := helium.RunHeliumServer(ctx, nc, nl, app, compute.NoInput)
+		hsv, cdescs, outs, err := helium.RunHeliumServer(ctx, nodeConfig, nl, app, compute.NoInput)
 		
 		if err != nil {
 			log.Fatalf("error running helium server: %v", err)
@@ -130,7 +130,6 @@ func main() {
 		}()
 
 		for out := range outs {
-			fmt.Println("Node", nc.ID, "received output", out)
 			encoder := bgv.NewEncoder(params)
 			pt := &rlwe.Plaintext{Element: out.Ciphertext.Element, Value: out.Ciphertext.Value[0]}
 			pt.IsBatched = true
@@ -138,10 +137,10 @@ func main() {
 
 			err := encoder.Decode(pt, res)
 			if err != nil {
-				log.Fatalf("%s | [main] error decoding output: %v\n", nc.ID, err)
+				log.Fatalf("%s | [main] error decoding output: %v\n", nodeConfig.ID, err)
 			}
 			if err != nil {
-				log.Fatalf("%s | [main] error decoding output: %v\n", nc.ID, err)
+				log.Fatalf("%s | [main] error decoding output: %v\n", nodeConfig.ID, err)
 			}
 
 			if err := checkResultCorrect(params, encoder, out); err != nil {
@@ -159,18 +158,14 @@ func main() {
 			"Net": hsv.GetStats(),
 		}
 	} else {
-		fmt.Println("Node", nc.ID, "running as client")
 
 		encoder := bgv.NewEncoder(params)
-		fmt.Println("NID", nid)
 		var ip compute.InputProvider = getInputProvider(params, encoder, v, nid)
-		secrets := loadSecrets(nc.SessionParameters[0], nid)
-		fmt.Println("Node", nc.ID, "running as client")
-		fmt.Println("Secrets", secrets)
+		secrets := loadSecrets(nodeConfig.SessionParameters[0], nid)
 
 		// runs the Helium client. The method returns a channel to receive the evaluation outputs
 		// for which the node is the receiver.
-		hc, outs, err := helium.RunHeliumClient(ctx, nc, nl, secrets, app, ip)
+		hc, outs, err := helium.RunHeliumClient(ctx, nodeConfig, nl, secrets, app, ip)
 		if err != nil {
 			log.Fatalf("error running helium client: %v", err)
 		}
@@ -178,7 +173,7 @@ func main() {
 
 		out, hasOut := <-outs
 		if hasOut {
-			log.Fatalf("Node %s received output: %v", nc.ID, out)
+			log.Fatalf("Node %s received output: %v", nodeConfig.ID, out)
 		}
 
 		if err := hc.Close(); err != nil {
@@ -212,7 +207,6 @@ func genNodeLists(nParty int, cloudAddr string) (nids []sessions.NodeID, nl node
 		shamirPks[nids[i]] = mhe.ShamirPublicPoint(i + 1)
 		nodeMapping[string(nids[i])] = nids[i]
 	}
-	fmt.Println("Cloud Address", cloudAddr)
 	nl = append(nl, struct {
 		sessions.NodeID
 		node.Address
@@ -299,7 +293,7 @@ func getInputProvider(params bgv.Parameters, encoder *bgv.Encoder, m int, nodeID
 		}
 
 		inchan := make(chan circuits.Input, 1)
-		inchan <- circuits.Input{OperandLabel: circuits.OperandLabel(fmt.Sprintf("//%s/%s/in", nodeID, cd.CircuitID)), OperandValue: pt}
+		inchan <- circuits.Input{OperandLabel: circuits.OperandLabel(fmt.Sprintf("//%s/%s/vec", nodeID, cd.CircuitID)), OperandValue: pt}
 		close(inchan)
 		return inchan, nil
 
@@ -331,7 +325,6 @@ func checkResultCorrect(params bgv.Parameters, encoder *bgv.Encoder, out circuit
 
 func vecAddDec(rt circuits.Runtime) error {
 
-	fmt.Println("Running vecAddDec")
 	nodeCount := nInputNodes
 	inputs := make(map[int]*circuits.FutureOperand)
 	

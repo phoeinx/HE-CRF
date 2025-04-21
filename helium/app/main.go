@@ -6,6 +6,8 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"math"
+	"math/rand"
 	"time"
 
 	"github.com/ChristianMct/helium"
@@ -54,7 +56,6 @@ func main() {
 	}
 
 	nInputNodes = *nParty
-	fmt.Println("Node ID", *nodeId)
 
 	// sets the threshold to the number of parties if not provided
 	var threshold int
@@ -118,8 +119,21 @@ func main() {
 		go func() {
 			var nSig int
 			for i := 0; i < *expRounds; i++ {
+				rand.New(rand.NewSource(time.Now().UnixNano()))
+
+				attributeDomains := AttributeDomains{
+					0: {Min: 0.0, Max: 1.0},
+					1: {Min: 5.0, Max: 10.0},
+					2: {Min: 0.0, Max: 2.0},
+				}
+
+				height := 3
+				treeCount := 10
+				trees := CreateTreeStructures(attributeDomains, height, treeCount)
+				treesString, _ := json.Marshal(trees)
 				cdescs <- circuits.Descriptor{
-					Signature:   circuits.Signature{Name: "vecadd-dec"},
+					//TODO: Add serialized tree structure, think about if new for every circuit? And think about if we can make the args any type.
+					Signature:   circuits.Signature{Name: "vecadd-dec", Args: map[string]string{"treeStructure": string(treesString)}},
 					CircuitID:   sessions.CircuitID(fmt.Sprintf("vecadd-%d", nSig)),
 					NodeMapping: nodeMapping,
 					Evaluator:   "cloud",
@@ -278,6 +292,14 @@ func getApp(params bgv.Parameters) node.App {
 func getInputProvider(params bgv.Parameters, encoder *bgv.Encoder, m int, nodeID sessions.NodeID) compute.InputProvider {
 	return func(ctx context.Context, sess sessions.Session, cd circuits.Descriptor) (chan circuits.Input, error) {
 
+		treesString := cd.Signature.Args["treeStructure"]
+		//Unmarshal array of PerfectBinaryTrees
+		treeStructures := make([]PerfectBinaryTree, 0)
+		err := json.Unmarshal([]byte(treesString), &treeStructures)
+		if err != nil {
+			return nil, fmt.Errorf("error unmarshalling tree structure: %v", err)
+		}
+
 		encoder := encoder.ShallowCopy()
 		var pt *rlwe.Plaintext
 		data := make([]uint64, m)
@@ -286,7 +308,7 @@ func getInputProvider(params bgv.Parameters, encoder *bgv.Encoder, m int, nodeID
 		}
 
 		pt = bgv.NewPlaintext(params, params.MaxLevelQ())
-		err := encoder.Encode(data, pt)
+		err = encoder.Encode(data, pt)
 
 		if err != nil {
 			return nil, err
@@ -380,4 +402,55 @@ func loadSecrets(params sessions.Parameters, nid sessions.NodeID) node.SecretPro
 	}
 
 	return sp
+}
+
+type Node struct {
+	AttributeIndex int
+	Threshold      float64
+	IsLeaf         bool
+}
+
+type PerfectBinaryTree struct {
+	Nodes  []Node
+	Height int
+}
+
+type AttributeDomain struct {
+	Min float64
+	Max float64
+}
+
+type AttributeDomains map[int]AttributeDomain
+
+func CreateTreeStructures(domains AttributeDomains, height int, count int) []PerfectBinaryTree {
+	trees := make([]PerfectBinaryTree, 0)
+
+	for i := 0; i < count; i++ {
+		tree := CreateTreeStructure(domains, height)
+		trees = append(trees, tree)
+	}
+
+	return trees
+}
+
+func CreateTreeStructure(domains AttributeDomains, height int) PerfectBinaryTree {
+	numNodes := int(math.Pow(2, float64(height))) - 1
+	nodes := make([]Node, numNodes)
+
+	if numNodes == 0 {
+		return PerfectBinaryTree{Nodes: nodes, Height: height}
+	}
+
+	for nodeIndex := 0; nodeIndex < numNodes; nodeIndex++ {
+		attributeKey := int(rand.Intn(len(domains))) //Attribute keys are a continuous range of integers starting from 0
+		attributeDomain := domains[attributeKey]
+		threshold := attributeDomain.Min + rand.Float64()*(attributeDomain.Max-attributeDomain.Min)
+		nodes[nodeIndex] = Node{
+			AttributeIndex: attributeKey,
+			Threshold:      threshold,
+			IsLeaf:         false,//TODO: Implement leaf nodes
+		}
+	}
+
+	return PerfectBinaryTree{Nodes: nodes, Height: height}
 }

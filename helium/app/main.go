@@ -180,7 +180,7 @@ func main() {
 			"Net": hsv.GetStats(),
 		}
 	} else {
-		
+
 		filename := fmt.Sprintf("./data/simulation/%s.csv", nid)
 		file, err := os.Open(filename)
 		if err != nil {
@@ -344,11 +344,10 @@ func getInputProvider(params bgv.Parameters, encoder *bgv.Encoder, m int, nodeID
 		}
 
 		// filter records
-		leafVector := CalculateLeafVector(treeStructures[0], records)
+		leafVector := CalculateLeafVector(treeStructures, records)
 
 		encoder := encoder.ShallowCopy()
-		var pt *rlwe.Plaintext
-		pt = bgv.NewPlaintext(params, params.MaxLevelQ())
+		pt := bgv.NewPlaintext(params, params.MaxLevelQ())
 		err = encoder.Encode(leafVector, pt)
 
 		if err != nil {
@@ -547,29 +546,31 @@ func (ad *AttributeDomains) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func CalculateLeafVector(tree PerfectBinaryTree, records [][]float64) []uint64 {
-	numLeaves := 1 << tree.Height
-	leafVector := make([]uint64, numLeaves * 2)
+func CalculateLeafVector(trees []PerfectBinaryTree, records [][]float64) []uint64 {
+	numLeaves := 1 << trees[0].Height // We expect all trees to have the same height
+	leafVector := make([]uint64, numLeaves * 2 * len(trees))
 
-	for _, record := range records {
-		nodeIndex := 0
-		for !tree.Nodes[nodeIndex].IsLeaf {
-			node := tree.Nodes[nodeIndex]
-			if record[node.AttributeIndex] <= node.Threshold {
-				nodeIndex = 2*nodeIndex + 1 // go left
-			} else {
-				nodeIndex = 2*nodeIndex + 2 // go right
+	for i, tree := range trees {
+		for _, record := range records {
+			nodeIndex := 0
+			for !tree.Nodes[nodeIndex].IsLeaf {
+				node := tree.Nodes[nodeIndex]
+				if record[node.AttributeIndex] <= node.Threshold {
+					nodeIndex = 2*nodeIndex + 1 // go left
+				} else {
+					nodeIndex = 2*nodeIndex + 2 // go right
+				}
 			}
+			leafStart := (1 << tree.Height) - 1
+			leafOffset := nodeIndex - leafStart
+			if leafOffset < 0 || leafOffset >= len(leafVector) {
+				log.Fatalf("Leaf index out of bounds: %d", leafOffset)
+			}
+			// class is stored in last element of record
+			recordClass := int(record[len(record)-1])
+			vecIndex := leafOffset*2 + recordClass
+			leafVector[i*numLeaves + vecIndex]++
 		}
-		leafStart := (1 << tree.Height) - 1
-		leafOffset := nodeIndex - leafStart
-		if leafOffset < 0 || leafOffset >= len(leafVector) {
-			log.Fatalf("Leaf index out of bounds: %d", leafOffset)
-		}
-		// class is stored in last element of record
-		recordClass := int(record[len(record)-1])
-		vecIndex := leafOffset*2 + recordClass
-		leafVector[vecIndex]++
 	}
 	return leafVector
 }

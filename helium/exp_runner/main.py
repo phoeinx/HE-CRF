@@ -32,7 +32,7 @@ FAILURE_DURATIONS = [
 ]  # the mean failure duration in min, cannot be zero (zero division in the simulation)
 N_REP = 10  # number of experiment repetition
 SKIP_TO = 0  # starts from a specific experiment number in the grid
-NUMBER_ESTIMATORS = [100]
+NUMBER_ESTIMATORS = [60]
 TREE_DEPTH = [3]
 
 

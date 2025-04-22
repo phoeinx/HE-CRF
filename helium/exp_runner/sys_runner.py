@@ -11,12 +11,26 @@ def log(str, end="\n"):
     print(str, file=sys.stderr, end=end, flush=True)
 
 class DockerNodeSystem:
-    def __init__(self, N, T, parties_host, cloud_host, rate_limit, delay, circuit_rounds):
+
+    def __init__(
+        self,
+        N,
+        T,
+        parties_host,
+        cloud_host,
+        rate_limit,
+        delay,
+        circuit_rounds,
+        n_estimators,
+        tree_depth,
+    ):
         self.N = N
         self.T = T
         self.rate_limit = rate_limit
         self.delay = delay
         self.circuit_rounds = circuit_rounds
+        self.n_estimators = n_estimators
+        self.tree_depth = tree_depth
         self.parties_host = parties_host
         self.cloud_host = cloud_host
         self.parties_docker_host = docker.DockerClient(base_url=host_to_docker_host_url(parties_host), use_ssh_client= parties_host != 'localhost', timeout=300,)
@@ -56,7 +70,17 @@ class DockerNodeSystem:
                 continue
 
     def start_cloud(self):
-        cmd = '-node_id cloud -n_party %d -threshold %d -cloud_address %s -expRounds %d' % (self.N, self.T, "%s:40000" % self.cloud_host, self.circuit_rounds)
+        cmd = (
+            "-node_id cloud -n_party %d -threshold %d -cloud_address %s -expRounds %d -nEstimators %d -treeDepth %d"
+            % (
+                self.N,
+                self.T,
+                "%s:40000" % self.cloud_host,
+                self.circuit_rounds,
+                self.n_estimators,
+                self.tree_depth,
+            )
+        )
         net = "expnet" if self.cloud_docker_host == self.parties_docker_host else "host"
         # net = "host"
         cpu_quota = 50000  # Half a CPU

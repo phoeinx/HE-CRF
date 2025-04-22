@@ -2,12 +2,15 @@ package main
 
 import (
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
 	"math"
 	"math/rand"
+	"os"
+	"strconv"
 	"time"
 
 	"github.com/ChristianMct/helium"
@@ -37,6 +40,8 @@ var (
 	cloudAddr    = flag.String("cloud_address", "", "the address of the helper node")
 	argThreshold = flag.Int("threshold", -1, "the threshold")
 	expRounds    = flag.Int("expRounds", 1, "number of circuit evaluatation rounds to perform")
+	nEstimators  = flag.Int("nEstimators", 100, "number of estimators to use for Completely Random Forest")
+	treeDepth   = flag.Int("treeDepth", 3, "depth of the trees")
 )
 
 func main() {
@@ -55,7 +60,16 @@ func main() {
 		panic("cloud_address argument must be provided for session nodes")
 	}
 
+	if *nEstimators < 1 {
+		panic("nEstimators argument should be provided and > 1")
+	}
+	if *treeDepth < 1 {
+		panic("treeDepth argument should be provided and > 1")
+	}
+
 	nInputNodes = *nParty
+	nEstimators := *nEstimators
+	treeDepth := *treeDepth
 
 	// sets the threshold to the number of parties if not provided
 	var threshold int
@@ -114,22 +128,17 @@ func main() {
 		timeSetup = time.Since(start)
 		fmt.Println("Time Setup", timeSetup)
 
+
 		start = time.Now()
+		// read attribute domains from file
+		attributeDomains := readAttributeDomains("./data/attribute_domains_breast_cancer.json")
 		// sends *expRounds evaluation requests to the server for circuit "vecadd-dec".
 		go func() {
 			var nSig int
 			for i := 0; i < *expRounds; i++ {
 				rand.New(rand.NewSource(time.Now().UnixNano()))
 
-				attributeDomains := AttributeDomains{
-					0: {Min: 0.0, Max: 1.0},
-					1: {Min: 5.0, Max: 10.0},
-					2: {Min: 0.0, Max: 2.0},
-				}
-
-				height := 3
-				treeCount := 10
-				trees := CreateTreeStructures(attributeDomains, height, treeCount)
+				trees := CreateTreeStructures(attributeDomains, treeDepth, nEstimators)
 				treesString, _ := json.Marshal(trees)
 				cdescs <- circuits.Descriptor{
 					//TODO: Add serialized tree structure, think about if new for every circuit? And think about if we can make the args any type.
@@ -144,6 +153,7 @@ func main() {
 		}()
 
 		for out := range outs {
+			fmt.Println("Received output")
 			encoder := bgv.NewEncoder(params)
 			pt := &rlwe.Plaintext{Element: out.Ciphertext.Element, Value: out.Ciphertext.Value[0]}
 			pt.IsBatched = true
@@ -157,9 +167,7 @@ func main() {
 				log.Fatalf("%s | [main] error decoding output: %v\n", nodeConfig.ID, err)
 			}
 
-			if err := checkResultCorrect(params, encoder, out); err != nil {
-				log.Fatalf("error checking result: %v", err)
-			}
+			fmt.Println("Received output", res)
 		}
 
 		hsv.GracefulStop() // waits for the last client to disconnect
@@ -172,9 +180,44 @@ func main() {
 			"Net": hsv.GetStats(),
 		}
 	} else {
+		
+		filename := fmt.Sprintf("./data/simulation/%s.csv", nid)
+		file, err := os.Open(filename)
+		if err != nil {
+			log.Fatalf("Error opening file:", err)
+			return
+		}
+		defer file.Close()
+		// read the file and store data
+		reader := csv.NewReader(file)
+		// Read the header (and ignore it)
+		_, err = reader.Read()
+		if err != nil {
+			log.Fatalf("Error reading file:", err)
+			return
+		}
+		records, err := reader.ReadAll()
+		if err != nil {
+			log.Fatalf("Error reading f    ile:", err)
+			return
+		}
+		var floatRecords [][]float64
+		for i, row := range records {
+			var floatRow []float64
+			for j, field := range row {
+				val, err := strconv.ParseFloat(field, 64)
+				if err != nil {
+					log.Fatalf("failed to parse float at row %d, col %d: %w", i, j, err)
+					return
+				}
+				floatRow = append(floatRow, val)
+			}
+			floatRecords = append(floatRecords, floatRow)
+		}
+
 
 		encoder := bgv.NewEncoder(params)
-		var ip compute.InputProvider = getInputProvider(params, encoder, v, nid)
+		var ip compute.InputProvider = getInputProvider(params, encoder, v, nid, floatRecords)
 		secrets := loadSecrets(nodeConfig.SessionParameters[0], nid)
 
 		// runs the Helium client. The method returns a channel to receive the evaluation outputs
@@ -289,7 +332,7 @@ func getApp(params bgv.Parameters) node.App {
 
 // getInputProvider generates an input provider function for the node. The input provider function
 // is registered to with the Helium node and is called by Helium to provide the input for the circuit evaluation.
-func getInputProvider(params bgv.Parameters, encoder *bgv.Encoder, m int, nodeID sessions.NodeID) compute.InputProvider {
+func getInputProvider(params bgv.Parameters, encoder *bgv.Encoder, m int, nodeID sessions.NodeID, records [][]float64 ) compute.InputProvider {
 	return func(ctx context.Context, sess sessions.Session, cd circuits.Descriptor) (chan circuits.Input, error) {
 
 		treesString := cd.Signature.Args["treeStructure"]
@@ -300,15 +343,13 @@ func getInputProvider(params bgv.Parameters, encoder *bgv.Encoder, m int, nodeID
 			return nil, fmt.Errorf("error unmarshalling tree structure: %v", err)
 		}
 
+		// filter records
+		leafVector := CalculateLeafVector(treeStructures[0], records)
+
 		encoder := encoder.ShallowCopy()
 		var pt *rlwe.Plaintext
-		data := make([]uint64, m)
-		for i := range data {
-			data[i] = uint64(i)
-		}
-
 		pt = bgv.NewPlaintext(params, params.MaxLevelQ())
-		err = encoder.Encode(data, pt)
+		err = encoder.Encode(leafVector, pt)
 
 		if err != nil {
 			return nil, err
@@ -415,6 +456,10 @@ type PerfectBinaryTree struct {
 	Height int
 }
 
+func (t PerfectBinaryTree) String() string {
+	return fmt.Sprintf("PBT: %d Nodes, % Height}", len(t.Nodes), t.Height)
+}
+
 type AttributeDomain struct {
 	Min float64
 	Max float64
@@ -434,23 +479,97 @@ func CreateTreeStructures(domains AttributeDomains, height int, count int) []Per
 }
 
 func CreateTreeStructure(domains AttributeDomains, height int) PerfectBinaryTree {
-	numNodes := int(math.Pow(2, float64(height))) - 1
-	nodes := make([]Node, numNodes)
+	numSplits := int(math.Pow(2, float64(height))) - 1
+	nodes := make([]Node, numSplits * 2 + 1) // 
 
-	if numNodes == 0 {
+	if numSplits == 0 {
 		return PerfectBinaryTree{Nodes: nodes, Height: height}
 	}
 
-	for nodeIndex := 0; nodeIndex < numNodes; nodeIndex++ {
+	for nodeIndex := 0; nodeIndex < numSplits; nodeIndex++ {
 		attributeKey := int(rand.Intn(len(domains))) //Attribute keys are a continuous range of integers starting from 0
 		attributeDomain := domains[attributeKey]
 		threshold := attributeDomain.Min + rand.Float64()*(attributeDomain.Max-attributeDomain.Min)
 		nodes[nodeIndex] = Node{
 			AttributeIndex: attributeKey,
 			Threshold:      threshold,
-			IsLeaf:         false,//TODO: Implement leaf nodes
+			IsLeaf:         false,
+		}
+	}
+	// Add leaf nodes
+	for i := numSplits; i < len(nodes); i++ {
+		nodes[i] = Node{
+			AttributeIndex: -1,
+			Threshold:      -1,
+			IsLeaf:         true,
+		}
+	}
+	return PerfectBinaryTree{Nodes: nodes, Height: height}
+}
+
+func readAttributeDomains(filename string) AttributeDomains {
+
+	data, err := os.ReadFile(filename)
+	if err != nil {
+		log.Fatalf("error reading file: %v", err)
+	}
+
+	attributeDomains := make(AttributeDomains)
+	err = json.Unmarshal(data, &attributeDomains)
+	if err != nil {
+		log.Fatalf("error unmarshalling JSON: %v", err)
+	}
+	return attributeDomains
+}
+
+func (ad *AttributeDomains) UnmarshalJSON(data []byte) error {
+	// Temp map with string keys and [2]float64 values
+	var raw map[string][2]float64
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	result := make(AttributeDomains)
+
+	// Convert string keys to int, and array to struct
+	for k, v := range raw {
+		intKey, err := strconv.Atoi(k)
+		if err != nil {
+			return err
+		}
+		result[intKey] = AttributeDomain{
+			Min: v[0],
+			Max: v[1],
 		}
 	}
 
-	return PerfectBinaryTree{Nodes: nodes, Height: height}
+	*ad = result
+	return nil
+}
+
+func CalculateLeafVector(tree PerfectBinaryTree, records [][]float64) []uint64 {
+	numLeaves := 1 << tree.Height
+	leafVector := make([]uint64, numLeaves * 2)
+
+	for _, record := range records {
+		nodeIndex := 0
+		for !tree.Nodes[nodeIndex].IsLeaf {
+			node := tree.Nodes[nodeIndex]
+			if record[node.AttributeIndex] <= node.Threshold {
+				nodeIndex = 2*nodeIndex + 1 // go left
+			} else {
+				nodeIndex = 2*nodeIndex + 2 // go right
+			}
+		}
+		leafStart := (1 << tree.Height) - 1
+		leafOffset := nodeIndex - leafStart
+		if leafOffset < 0 || leafOffset >= len(leafVector) {
+			log.Fatalf("Leaf index out of bounds: %d", leafOffset)
+		}
+		// class is stored in last element of record
+		recordClass := int(record[len(record)-1])
+		vecIndex := leafOffset*2 + recordClass
+		leafVector[vecIndex]++
+	}
+	return leafVector
 }

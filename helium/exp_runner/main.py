@@ -7,6 +7,9 @@ from itertools import product
 from churn_sim import NodeSystemSimulation
 from sys_runner import DockerNodeSystem
 from collections import OrderedDict
+import pandas as pd
+import os
+import shutil
 
 # ====== Environment ======
 PARTIES_HOST = 'localhost'     # parties should always be run on localhost
@@ -21,18 +24,16 @@ DELAY = "30ms"         # outbound network delay for the parties
 EVAL_COUNT = 10  # number of circuit evaluation performed per experiment
 
 # ====== Experiment Grid ======
-N_PARTIES = [2, 5, 10, 50, 100]  # the number of session nodes
-THRESH_VALUES = [
-    0.5,
-    0.75,
-    1,
-]  # the cryptographic threshold in percentage of the number of nodes
+N_PARTIES = [2]  # the number of session nodes
+THRESH_VALUES = [1]  # the cryptographic threshold in percentage of the number of nodes
 FAILURE_RATES = [0]  # the failure rate in fail/min
 FAILURE_DURATIONS = [
     0.1
 ]  # the mean failure duration in min, cannot be zero (zero division in the simulation)
 N_REP = 10  # number of experiment repetition
-SKIP_TO = 0                             # starts from a specific experiment number in the grid
+SKIP_TO = 0  # starts from a specific experiment number in the grid
+NUMBER_ESTIMATORS = [100]
+TREE_DEPTH = [3]
 
 
 def log(str, end="\n"):
@@ -62,7 +63,21 @@ def get_stats(container, print=False):
 
 log("Computing experiments...")
 exps_to_run = []
-for n_party, thresh, mean_failure_per_min, mean_failure_duration in product(N_PARTIES, THRESH_VALUES, FAILURE_RATES, FAILURE_DURATIONS):
+for (
+    n_party,
+    thresh,
+    mean_failure_per_min,
+    mean_failure_duration,
+    n_estimators,
+    tree_depth,
+) in product(
+    N_PARTIES,
+    THRESH_VALUES,
+    FAILURE_RATES,
+    FAILURE_DURATIONS,
+    NUMBER_ESTIMATORS,
+    TREE_DEPTH,
+):
     thresh = round(n_party * thresh)
     sim = NodeSystemSimulation(
         n_party, mean_failure_per_min, mean_failure_duration, EPOCH_TIME
@@ -73,7 +88,16 @@ for n_party, thresh, mean_failure_per_min, mean_failure_duration in product(N_PA
     )
     if frac_time_above_thresh < EXP_SKIP_THRESH:
         continue
-    exps_to_run.append((n_party, thresh, mean_failure_per_min, mean_failure_duration))
+    exps_to_run.append(
+        (
+            n_party,
+            thresh,
+            mean_failure_per_min,
+            mean_failure_duration,
+            n_estimators,
+            tree_depth,
+        )
+    )
 log("%d experiments to run" % (len(exps_to_run)*N_REP))
 
 for i, (exp, rep) in enumerate(product(exps_to_run, range(N_REP))):
@@ -81,11 +105,51 @@ for i, (exp, rep) in enumerate(product(exps_to_run, range(N_REP))):
     if i+1 < SKIP_TO:
         continue
 
-    n_party, thresh, mean_failure_per_min, mean_failure_duration = exp
+    (
+        n_party,
+        thresh,
+        mean_failure_per_min,
+        mean_failure_duration,
+        n_estimators,
+        tree_depth,
+    ) = exp
 
     log("======= starting experiment N=%d T=%d F=%.2f REP=%d =======" % (n_party, thresh, mean_failure_per_min, rep))
 
-    system = DockerNodeSystem(n_party, thresh, PARTIES_HOST, CLOUD_HOST, RATE_LIMIT, DELAY, EVAL_COUNT)
+    # Divide data into n_party chunks
+    # Delete all old data in data/simulation/ folder
+
+    if os.path.exists("helium/exp_runner/data/simulation/"):
+        shutil.rmtree("helium/exp_runner/data/simulation/")
+    os.makedirs("helium/exp_runner/data/simulation/", exist_ok=True)
+
+    random_state = 0
+    data = pd.read_csv("helium/exp_runner/data/preprocessed_breast_cancer.csv")
+    data = data.sample(frac=1, random_state=random_state).reset_index(
+        drop=True
+    )  # Shuffle the data
+    k, m = divmod(len(data), n_party)
+    data_chunks = [
+        data[i * k + min(i, m) : (i + 1) * k + min(i + 1, m)] for i in range(n_party)
+    ]
+
+    # write out data chunks with party id to data/simulation/ folder
+    for party_id, chunk in enumerate(data_chunks):
+        chunk.to_csv(
+            f"helium/exp_runner/data/simulation/node-{party_id}.csv", index=False
+        )
+
+    system = DockerNodeSystem(
+        n_party,
+        thresh,
+        PARTIES_HOST,
+        CLOUD_HOST,
+        RATE_LIMIT,
+        DELAY,
+        EVAL_COUNT,
+        n_estimators,
+        tree_depth,
+    )
 
     churn_sim = NodeSystemSimulation(n_party,
                                     mean_failure_per_min,

@@ -1,3 +1,4 @@
+import os
 import docker
 import sys
 import time
@@ -85,15 +86,27 @@ class DockerNodeSystem:
         # net = "host"
         cpu_quota = 50000  # Half a CPU
         memory_limit = "512m"
-        return self.cloud_docker_host.containers.run('exp:helium',
-                                        name="cloud",
-                                        hostname="cloud",
-                                        command=cmd,
-                                        network=net,
-                                        labels=[EXP_CONTAINER_LABEL],
-                                        cpu_quota=cpu_quota,
-                                        mem_limit=memory_limit,
-                                        detach=True)
+
+        # model output volume
+        base_path = os.path.abspath("./output/models")
+        os.makedirs(base_path, exist_ok=True)
+        return self.cloud_docker_host.containers.run(
+            "exp:helium",
+            name="cloud",
+            hostname="cloud",
+            command=cmd,
+            network=net,
+            labels=[EXP_CONTAINER_LABEL],
+            cpu_quota=cpu_quota,
+            mem_limit=memory_limit,
+            volumes={
+                base_path: {
+                    "bind": "/models",
+                    "mode": "rw",
+                }
+            },
+            detach=True,
+        )
 
     def create_player(self, i):
         container_name = "node-%d" % i

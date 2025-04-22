@@ -21,7 +21,7 @@ EXP_SKIP_THRESH = 0.2 # experiments for which the expected time above threshold 
 # ====== Experiments parameters ======
 RATE_LIMIT = "100mbit" # outbound rate limit for the parties
 DELAY = "30ms"         # outbound network delay for the parties
-EVAL_COUNT = 10  # number of circuit evaluation performed per experiment
+EVAL_COUNT = 1  # number of circuit evaluation performed per experiment
 
 # ====== Experiment Grid ======
 N_PARTIES = [2]  # the number of session nodes
@@ -30,7 +30,7 @@ FAILURE_RATES = [0]  # the failure rate in fail/min
 FAILURE_DURATIONS = [
     0.1
 ]  # the mean failure duration in min, cannot be zero (zero division in the simulation)
-N_REP = 10  # number of experiment repetition
+N_REP = 1  # number of experiment repetition
 SKIP_TO = 0  # starts from a specific experiment number in the grid
 NUMBER_ESTIMATORS = [60]
 TREE_DEPTH = [3]

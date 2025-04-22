@@ -39,7 +39,7 @@ var (
 	nParty       = flag.Int("n_party", -1, "the number of parties")
 	cloudAddr    = flag.String("cloud_address", "", "the address of the helper node")
 	argThreshold = flag.Int("threshold", -1, "the threshold")
-	expRounds    = flag.Int("expRounds", 1, "number of circuit evaluatation rounds to perform")
+	expRounds    = flag.Int("expRounds", 1, "number of circuit evaluation rounds to perform")
 	nEstimators  = flag.Int("nEstimators", 100, "number of estimators to use for Completely Random Forest")
 	treeDepth   = flag.Int("treeDepth", 3, "depth of the trees")
 )
@@ -133,33 +133,34 @@ func main() {
 		// read attribute domains from file
 		attributeDomains := readAttributeDomains("./data/attribute_domains_breast_cancer.json")
 		// sends *expRounds evaluation requests to the server for circuit "vecadd-dec".
-		go func() {
-			var nSig int
-			for i := 0; i < *expRounds; i++ {
-				rand.New(rand.NewSource(time.Now().UnixNano()))
+		rand.New(rand.NewSource(time.Now().UnixNano()))
+		treeStructureMap := make(map[string]string)
+		for nSig := 0; nSig < *expRounds; nSig++ {
+			trees := CreateTreeStructures(attributeDomains, treeDepth, nEstimators)
+			treesString, _ := json.Marshal(trees)
+			treeStructureMap[fmt.Sprintf("vecadd-%d", nSig)] = string(treesString)
+		}
 
-				trees := CreateTreeStructures(attributeDomains, treeDepth, nEstimators)
-				treesString, _ := json.Marshal(trees)
+		go func() {
+			for nSig := 0; nSig < *expRounds; nSig++ {
+				sigID := fmt.Sprintf("vecadd-%d", nSig)
 				cdescs <- circuits.Descriptor{
-					//TODO: Add serialized tree structure, think about if new for every circuit? And think about if we can make the args any type.
-					Signature:   circuits.Signature{Name: "vecadd-dec", Args: map[string]string{"treeStructure": string(treesString)}},
-					CircuitID:   sessions.CircuitID(fmt.Sprintf("vecadd-%d", nSig)),
+					Signature:   circuits.Signature{Name: "vecadd-dec", Args: map[string]string{"treeStructure": treeStructureMap[sigID]}},
+					CircuitID:   sessions.CircuitID(sigID),
 					NodeMapping: nodeMapping,
 					Evaluator:   "cloud",
 				}
-				nSig++
 			}
 			close(cdescs)
 		}()
 
 		for out := range outs {
-			fmt.Println("Received output")
 			encoder := bgv.NewEncoder(params)
 			pt := &rlwe.Plaintext{Element: out.Ciphertext.Element, Value: out.Ciphertext.Value[0]}
 			pt.IsBatched = true
-			res := make([]uint64, params.MaxSlots())
+			aggregatedLeafCounts := make([]uint64, params.MaxSlots())
 
-			err := encoder.Decode(pt, res)
+			err := encoder.Decode(pt, aggregatedLeafCounts)
 			if err != nil {
 				log.Fatalf("%s | [main] error decoding output: %v\n", nodeConfig.ID, err)
 			}
@@ -167,7 +168,48 @@ func main() {
 				log.Fatalf("%s | [main] error decoding output: %v\n", nodeConfig.ID, err)
 			}
 
-			fmt.Println("Received output", res)
+			// Create model
+			sigID := out.CircuitID
+			treeStructure := treeStructureMap[string(sigID)]
+
+			model := make([]PerfectBinaryTree, 0)
+			err = json.Unmarshal([]byte(treeStructure), &model)
+			if err != nil {
+				log.Fatalf("error unmarshalling tree structure: %v", err)
+			}
+
+			for treeIndex, tree := range model {
+				firstLeafIndex := (1 << tree.Height) - 1
+				for leafIndex := firstLeafIndex; leafIndex < len(tree.Nodes); leafIndex++ {
+					countIndex := treeIndex * 2 + (leafIndex - firstLeafIndex) * 2
+					totalLeafCount := aggregatedLeafCounts[countIndex] + aggregatedLeafCounts[countIndex + 1]
+					if totalLeafCount == 0 {
+						tree.Nodes[leafIndex].IsEmpty = true
+						continue
+					}
+					tree.Nodes[leafIndex].Prediction[0] = float64(aggregatedLeafCounts[countIndex]) / float64(totalLeafCount)
+					tree.Nodes[leafIndex].Prediction[1] = float64(aggregatedLeafCounts[countIndex + 1]) / float64(totalLeafCount)
+				}
+
+			}
+
+			// write out model to file
+			filename := fmt.Sprintf("/models/%s-%s.json", nodeConfig.ID, out.CircuitID)
+			file, err := os.Create(filename)
+			if err != nil {
+				log.Fatalf("Error creating file:", err)
+				return
+			}
+			defer file.Close()
+			jsonEncoder := json.NewEncoder(file)
+			jsonEncoder.SetIndent("", "  ")
+			err = jsonEncoder.Encode(model)
+			if err != nil {
+				log.Fatalf("Error encoding JSON:", err)
+				return
+			}
+			fmt.Printf("Node %s | [main] wrote model to %s\n", nodeConfig.ID, filename)
+
 		}
 
 		hsv.GracefulStop() // waits for the last client to disconnect
@@ -448,6 +490,8 @@ type Node struct {
 	AttributeIndex int
 	Threshold      float64
 	IsLeaf         bool
+	Prediction	   [2]float64
+	IsEmpty	   bool
 }
 
 type PerfectBinaryTree struct {
@@ -456,7 +500,7 @@ type PerfectBinaryTree struct {
 }
 
 func (t PerfectBinaryTree) String() string {
-	return fmt.Sprintf("PBT: %d Nodes, % Height}", len(t.Nodes), t.Height)
+	return fmt.Sprintf("PBT: %d Nodes, %d Height}", len(t.Nodes), t.Height)
 }
 
 type AttributeDomain struct {

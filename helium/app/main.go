@@ -523,22 +523,66 @@ func CreateTreeStructures(domains AttributeDomains, height int, count int) []Per
 
 func CreateTreeStructure(domains AttributeDomains, height int) PerfectBinaryTree {
 	numSplits := int(math.Pow(2, float64(height))) - 1
-	nodes := make([]Node, numSplits * 2 + 1) // 
+	nodes := make([]Node, numSplits*2+1)
 
-	if numSplits == 0 {
-		return PerfectBinaryTree{Nodes: nodes, Height: height}
+	getChildIndices := func(index int) (left int, right int) {
+		return 2 * index + 1, 2 * index + 2
 	}
 
+	copyDomains := func(domains AttributeDomains) map[int]AttributeDomain {
+		domainsCopy := make(map[int]AttributeDomain)
+		for k, v := range domains {
+			domainsCopy[k] = AttributeDomain{Min: v.Min, Max: v.Max}
+		}
+		return domainsCopy
+	}
+
+	// Track constraints for each node
+	domainConstraints := make([]map[int]AttributeDomain, len(nodes))
+	for nodeIndex := range domainConstraints {
+		domainConstraints[nodeIndex] = copyDomains(domains)
+	}
+
+	// Build tree from top down
 	for nodeIndex := 0; nodeIndex < numSplits; nodeIndex++ {
-		attributeKey := int(rand.Intn(len(domains))) //Attribute keys are a continuous range of integers starting from 0
-		attributeDomain := domains[attributeKey]
-		threshold := attributeDomain.Min + rand.Float64()*(attributeDomain.Max-attributeDomain.Min)
+		fmt.Println("Node index:", nodeIndex)
+		fmt.Println("Domain constraints:", domainConstraints[nodeIndex])
+		// Select an attribute
+		attributeKey := int(rand.Intn(len(domains)))
+		attrDomain := domainConstraints[nodeIndex][attributeKey]
+
+		// Generate threshold within constrained domain
+		if attrDomain.Max <= attrDomain.Min {
+			// TODO: Adapt?
+			log.Fatal("Invalid domain for attribute, cannot split further")
+		}
+
+		threshold := attrDomain.Min + rand.Float64()*(attrDomain.Max-attrDomain.Min)
 		nodes[nodeIndex] = Node{
 			AttributeIndex: attributeKey,
 			Threshold:      threshold,
 			IsLeaf:         false,
 		}
+
+		// Propagate new constraints to children
+		leftChildIndex, rightChildIndex := getChildIndices(nodeIndex)
+
+		if leftChildIndex < len(nodes) {
+			domainConstraints[leftChildIndex] = copyDomains(domainConstraints[nodeIndex])
+			domainConstraints[leftChildIndex][attributeKey] = AttributeDomain{
+				Min: attrDomain.Min,
+				Max: threshold,
+			}
+		}
+		if rightChildIndex < len(nodes) {
+			domainConstraints[rightChildIndex] = copyDomains(domainConstraints[nodeIndex])
+			domainConstraints[rightChildIndex][attributeKey] = AttributeDomain{
+				Min: threshold,
+				Max: attrDomain.Max,
+			}
+		}
 	}
+
 	// Add leaf nodes
 	for i := numSplits; i < len(nodes); i++ {
 		nodes[i] = Node{
@@ -547,6 +591,7 @@ func CreateTreeStructure(domains AttributeDomains, height int) PerfectBinaryTree
 			IsLeaf:         true,
 		}
 	}
+
 	return PerfectBinaryTree{Nodes: nodes, Height: height}
 }
 

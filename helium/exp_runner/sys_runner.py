@@ -24,6 +24,7 @@ class DockerNodeSystem:
         circuit_rounds,
         n_estimators,
         tree_depth,
+        fold,
     ):
         self.N = N
         self.T = T
@@ -34,6 +35,7 @@ class DockerNodeSystem:
         self.tree_depth = tree_depth
         self.parties_host = parties_host
         self.cloud_host = cloud_host
+        self.fold = fold
         self.parties_docker_host = docker.DockerClient(base_url=host_to_docker_host_url(parties_host), use_ssh_client= parties_host != 'localhost', timeout=300,)
         self.cloud_docker_host = self.parties_docker_host if cloud_host == parties_host else docker.DockerClient(base_url=host_to_docker_host_url(cloud_host), use_ssh_client= cloud_host != 'localhost')
 
@@ -88,8 +90,7 @@ class DockerNodeSystem:
         memory_limit = "512m"
 
         # model output volume
-        base_path = os.path.abspath("./output/models")
-        os.makedirs(base_path, exist_ok=True)
+        data_path = os.path.abspath("./helium/exp_runner/data")
         return self.cloud_docker_host.containers.run(
             "exp:helium",
             name="cloud",
@@ -100,8 +101,8 @@ class DockerNodeSystem:
             cpu_quota=cpu_quota,
             mem_limit=memory_limit,
             volumes={
-                base_path: {
-                    "bind": "/models",
+                data_path: {
+                    "bind": "/helium/data",
                     "mode": "rw",
                 }
             },
@@ -115,6 +116,7 @@ class DockerNodeSystem:
         caps = ["NET_ADMIN"]
         net = "expnet"
         env = {"RATE_LIMIT": self.rate_limit, "DELAY": self.delay}
+        data_path = os.path.abspath("./helium/exp_runner/data")
         container = self.parties_docker_host.containers.create(
             "exp:helium",
             name=container_name,
@@ -125,6 +127,12 @@ class DockerNodeSystem:
             environment=env,
             labels=[EXP_CONTAINER_LABEL],
             detach=True,
+            volumes={
+                data_path: {
+                    "bind": "/helium/data",
+                    "mode": "rw",
+                }
+            },
         )
         log("created node-%d" % i)
         return container

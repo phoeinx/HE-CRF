@@ -3,3 +3,8 @@
 *.pdf
 __pycache__
 results
+
+data/
+output/
+log*
+results*

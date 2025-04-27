@@ -1,7 +1,7 @@
 #########################################
 #  Builder                              #
 #########################################
-FROM golang:1.22.3 as builder
+FROM golang:1.22.3 AS builder
 
 ARG APP=./app
 
@@ -27,7 +27,6 @@ RUN apt update
 RUN apt install -y iproute2
 
 COPY ./shape_traffic_and_start.sh /helium/shape_traffic_and_start.sh
-COPY ./exp_runner/data/ /helium/data
 
 COPY --from=builder /helium/node /helium/node
 

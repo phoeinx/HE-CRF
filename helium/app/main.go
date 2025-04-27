@@ -91,6 +91,40 @@ func main() {
 	// generates a nodeConfig for the node running this program
 	nodeConfig := genConfigForNode(nid, nids, threshold, shamirPks)
 
+	experimentConfigFile := "/helium/data/experiments/experiment_config.json"
+
+	entries, err := os.ReadDir("/helium/data/experiments")
+
+	for _, e := range entries {
+		fmt.Println(e.Name())
+	}
+
+	// get timestamp of file
+	fileInfo, err := os.Stat(experimentConfigFile)
+	if err != nil {
+		log.Fatalf("Error getting file info: %v", err)
+	}
+	fmt.Println("File stats:", fileInfo.ModTime())
+	// read the experiment config from the file
+	file, err := os.Open(experimentConfigFile)
+	if err != nil {
+		log.Fatalf("Error opening file: %v", err)
+	}
+	defer file.Close()
+	decoder := json.NewDecoder(file)
+	var experimentConfig map[string]interface{}
+	err = decoder.Decode(&experimentConfig)
+	if err != nil {
+		log.Fatalf("Error decoding JSON: %v", err)
+	}
+	dataFolderPath := experimentConfig["data_folder_path"].(string)
+	attributeDomainsPath := experimentConfig["attribute_domains_path"].(string)
+	modelPath := experimentConfig["model_path"].(string)
+	fmt.Println("Data folder path:", dataFolderPath)
+	fmt.Println("Attribute domains path:", attributeDomainsPath)
+	fmt.Println("Model path:", modelPath)
+
+
 	// retreives the session parameters from the node config
 	params, err := bgv.NewParametersFromLiteral(nodeConfig.SessionParameters[0].FHEParameters.(bgv.ParametersLiteral))
 	if err != nil {
@@ -128,10 +162,15 @@ func main() {
 		timeSetup = time.Since(start)
 		fmt.Println("Time Setup", timeSetup)
 
-
+	
 		start = time.Now()
+		//TODO: Check which file reading we should track
+		
+		// read Experiment Config from JSON file
+
+
 		// read attribute domains from file
-		attributeDomains := readAttributeDomains("./data/attribute_domains_breast_cancer.json")
+		attributeDomains := readAttributeDomains(attributeDomainsPath)
 		// sends *expRounds evaluation requests to the server for circuit "vecadd-dec".
 		rand.New(rand.NewSource(time.Now().UnixNano()))
 		treeStructureMap := make(map[string]string)
@@ -194,7 +233,7 @@ func main() {
 			}
 
 			// write out model to file
-			filename := fmt.Sprintf("/models/%s-%s.json", nodeConfig.ID, out.CircuitID)
+			filename := modelPath
 			file, err := os.Create(filename)
 			if err != nil {
 				log.Fatalf("Error creating file:", err)
@@ -223,7 +262,9 @@ func main() {
 		}
 	} else {
 
-		filename := fmt.Sprintf("./data/simulation/%s.csv", nid)
+		//print listdir of "data/experiments"
+		filename := fmt.Sprintf("%s/%s.csv", dataFolderPath, nid)
+		fmt.Println("Reading data from", filename)
 		file, err := os.Open(filename)
 		if err != nil {
 			log.Fatalf("Error opening file:", err)

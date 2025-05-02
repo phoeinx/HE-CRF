@@ -91,41 +91,9 @@ func main() {
 	// generates a nodeConfig for the node running this program
 	nodeConfig := genConfigForNode(nid, nids, threshold, shamirPks)
 
-	experimentConfigFile := "/helium/data/experiments/experiment_config.json"
+	dataFolderPath, attributeDomainsPath, modelPath := readExperimentConfig()
 
-	entries, err := os.ReadDir("/helium/data/experiments")
-
-	for _, e := range entries {
-		fmt.Println(e.Name())
-	}
-
-	// get timestamp of file
-	fileInfo, err := os.Stat(experimentConfigFile)
-	if err != nil {
-		log.Fatalf("Error getting file info: %v", err)
-	}
-	fmt.Println("File stats:", fileInfo.ModTime())
-	// read the experiment config from the file
-	file, err := os.Open(experimentConfigFile)
-	if err != nil {
-		log.Fatalf("Error opening file: %v", err)
-	}
-	defer file.Close()
-	decoder := json.NewDecoder(file)
-	var experimentConfig map[string]interface{}
-	err = decoder.Decode(&experimentConfig)
-	if err != nil {
-		log.Fatalf("Error decoding JSON: %v", err)
-	}
-	dataFolderPath := experimentConfig["data_folder_path"].(string)
-	attributeDomainsPath := experimentConfig["attribute_domains_path"].(string)
-	modelPath := experimentConfig["model_path"].(string)
-	fmt.Println("Data folder path:", dataFolderPath)
-	fmt.Println("Attribute domains path:", attributeDomainsPath)
-	fmt.Println("Model path:", modelPath)
-
-
-	// retreives the session parameters from the node config
+	// retrieves the session parameters from the node config
 	params, err := bgv.NewParametersFromLiteral(nodeConfig.SessionParameters[0].FHEParameters.(bgv.ParametersLiteral))
 	if err != nil {
 		panic(err)
@@ -136,9 +104,6 @@ func main() {
 	v := params.MaxSlots()
 
 	// generates the Helium application (see helium/node/app.go).
-	// The app declares a circuit "vecadd-dec" that computes the
-	// sum of encrypted vectors from each node followed by 
-	// a collective decryption.
 	app := getApp(params)
 
 	// creates a context for the session
@@ -165,15 +130,12 @@ func main() {
 	
 		start = time.Now()
 		//TODO: Check which file reading we should track
-		
-		// read Experiment Config from JSON file
-
-
-		// read attribute domains from file
 		attributeDomains := readAttributeDomains(attributeDomainsPath)
-		// sends *expRounds evaluation requests to the server for circuit "vecadd-dec".
+
 		rand.New(rand.NewSource(time.Now().UnixNano()))
 		treeStructureMap := make(map[string]string)
+
+		// sends *expRounds evaluation requests to the server for circuit "vecadd-dec".
 		for nSig := 0; nSig < *expRounds; nSig++ {
 			trees := CreateTreeStructures(attributeDomains, treeDepth, nEstimators)
 			treesString, _ := json.Marshal(trees)
@@ -207,48 +169,10 @@ func main() {
 				log.Fatalf("%s | [main] error decoding output: %v\n", nodeConfig.ID, err)
 			}
 
-			// Create model
-			sigID := out.CircuitID
-			treeStructure := treeStructureMap[string(sigID)]
+			model := createModel(out.CircuitID, treeStructureMap, aggregatedLeafCounts)
 
-			model := make([]PerfectBinaryTree, 0)
-			err = json.Unmarshal([]byte(treeStructure), &model)
-			if err != nil {
-				log.Fatalf("error unmarshalling tree structure: %v", err)
-			}
-
-			for treeIndex, tree := range model {
-				firstLeafIndex := (1 << tree.Height) - 1
-				for leafIndex := firstLeafIndex; leafIndex < len(tree.Nodes); leafIndex++ {
-					countIndex := treeIndex * 2 + (leafIndex - firstLeafIndex) * 2
-					totalLeafCount := aggregatedLeafCounts[countIndex] + aggregatedLeafCounts[countIndex + 1]
-					if totalLeafCount == 0 {
-						tree.Nodes[leafIndex].IsEmpty = true
-						continue
-					}
-					tree.Nodes[leafIndex].Prediction[0] = float64(aggregatedLeafCounts[countIndex]) / float64(totalLeafCount)
-					tree.Nodes[leafIndex].Prediction[1] = float64(aggregatedLeafCounts[countIndex + 1]) / float64(totalLeafCount)
-				}
-
-			}
-
-			// write out model to file
-			filename := modelPath
-			file, err := os.Create(filename)
-			if err != nil {
-				log.Fatalf("Error creating file:", err)
-				return
-			}
-			defer file.Close()
-			jsonEncoder := json.NewEncoder(file)
-			jsonEncoder.SetIndent("", "  ")
-			err = jsonEncoder.Encode(model)
-			if err != nil {
-				log.Fatalf("Error encoding JSON:", err)
-				return
-			}
-			fmt.Printf("Node %s | [main] wrote model to %s\n", nodeConfig.ID, filename)
-
+			writeOutModel(modelPath, model, nodeConfig)
+			
 		}
 
 		hsv.GracefulStop() // waits for the last client to disconnect
@@ -262,45 +186,10 @@ func main() {
 		}
 	} else {
 
-		//print listdir of "data/experiments"
-		filename := fmt.Sprintf("%s/%s.csv", dataFolderPath, nid)
-		fmt.Println("Reading data from", filename)
-		file, err := os.Open(filename)
-		if err != nil {
-			log.Fatalf("Error opening file:", err)
-			return
-		}
-		defer file.Close()
-		// read the file and store data
-		reader := csv.NewReader(file)
-		// Read the header (and ignore it)
-		_, err = reader.Read()
-		if err != nil {
-			log.Fatalf("Error reading file:", err)
-			return
-		}
-		records, err := reader.ReadAll()
-		if err != nil {
-			log.Fatalf("Error reading f    ile:", err)
-			return
-		}
-		var floatRecords [][]float64
-		for i, row := range records {
-			var floatRow []float64
-			for j, field := range row {
-				val, err := strconv.ParseFloat(field, 64)
-				if err != nil {
-					log.Fatalf("failed to parse float at row %d, col %d: %w", i, j, err)
-					return
-				}
-				floatRow = append(floatRow, val)
-			}
-			floatRecords = append(floatRecords, floatRow)
-		}
-
+		records := readNodeData(dataFolderPath, nid)
 
 		encoder := bgv.NewEncoder(params)
-		var ip compute.InputProvider = getInputProvider(params, encoder, v, nid, floatRecords)
+		var ip compute.InputProvider = getInputProvider(params, encoder, v, nid, records)
 		secrets := loadSecrets(nodeConfig.SessionParameters[0], nid)
 
 		// runs the Helium client. The method returns a channel to receive the evaluation outputs
@@ -309,7 +198,6 @@ func main() {
 		if err != nil {
 			log.Fatalf("error running helium client: %v", err)
 		}
-
 
 		out, hasOut := <-outs
 		if hasOut {
@@ -331,6 +219,105 @@ func main() {
 		log.Fatalf("error marshalling stats: %v", err)
 	}
 	fmt.Println("STATS", string(statsJson))
+}
+
+func readNodeData(dataFolderPath string, nid sessions.NodeID) ([][]float64) {
+	filename := fmt.Sprintf("%s/%s.csv", dataFolderPath, nid)
+	file, err := os.Open(filename)
+	if err != nil {
+		log.Fatalf("Error opening file:", err)
+	}
+	defer file.Close()
+	reader := csv.NewReader(file)
+
+	_, err = reader.Read()
+	if err != nil {
+		log.Fatalf("Error reading file:", err)
+	}
+	records, err := reader.ReadAll()
+	if err != nil {
+		log.Fatalf("Error reading f    ile:", err)
+	}
+
+	var floatRecords [][]float64
+	for i, row := range records {
+		var floatRow []float64
+		for j, field := range row {
+			val, err := strconv.ParseFloat(field, 64)
+			if err != nil {
+				log.Fatalf("failed to parse float at row %d, col %d: %w", i, j, err)
+			}
+			floatRow = append(floatRow, val)
+		}
+		floatRecords = append(floatRecords, floatRow)
+	}
+	return floatRecords
+}
+
+func writeOutModel(modelPath string, model []PerfectBinaryTree, nodeConfig node.Config) bool {
+	filename := modelPath
+	file, err := os.Create(filename)
+	if err != nil {
+		log.Fatalf("Error creating file:", err)
+		return true
+	}
+	defer file.Close()
+	jsonEncoder := json.NewEncoder(file)
+	jsonEncoder.SetIndent("", "  ")
+	err = jsonEncoder.Encode(model)
+	if err != nil {
+		log.Fatalf("Error encoding JSON:", err)
+		return true
+	}
+	fmt.Printf("Node %s | [main] wrote model to %s\n", nodeConfig.ID, filename)
+	return false
+}
+
+func createModel(sigID sessions.CircuitID, treeStructureMap map[string]string, aggregatedLeafCounts []uint64) []PerfectBinaryTree {
+	treeStructure := treeStructureMap[string(sigID)]
+
+	model := make([]PerfectBinaryTree, 0)
+	err := json.Unmarshal([]byte(treeStructure), &model)
+	if err != nil {
+		log.Fatalf("error unmarshalling tree structure: %v", err)
+	}
+
+	for treeIndex, tree := range model {
+		firstLeafIndex := (1 << tree.Height) - 1
+		leafCount := 1 << (tree.Height + 1)
+		for leafIndex := firstLeafIndex; leafIndex < len(tree.Nodes); leafIndex++ {
+			countIndex := treeIndex*leafCount + (leafIndex-firstLeafIndex)*2
+			totalLeafCount := aggregatedLeafCounts[countIndex] + aggregatedLeafCounts[countIndex+1]
+			if totalLeafCount == 0 {
+				tree.Nodes[leafIndex].IsEmpty = true
+				continue
+			}
+			tree.Nodes[leafIndex].Prediction[0] = float64(aggregatedLeafCounts[countIndex]) / float64(totalLeafCount)
+			tree.Nodes[leafIndex].Prediction[1] = float64(aggregatedLeafCounts[countIndex+1]) / float64(totalLeafCount)
+
+		}
+	}
+	return model
+}
+
+func readExperimentConfig() (string, string, string) {
+	experimentConfigFile := "/helium/data/experiments/experiment_config.json"
+	file, err := os.Open(experimentConfigFile)
+	if err != nil {
+		log.Fatalf("Error opening file: %v", err)
+	}
+	defer file.Close()
+
+	decoder := json.NewDecoder(file)
+	var experimentConfig map[string]interface{}
+	err = decoder.Decode(&experimentConfig)
+	if err != nil {
+		log.Fatalf("Error decoding JSON: %v", err)
+	}
+	dataFolderPath := experimentConfig["data_folder_path"].(string)
+	attributeDomainsPath := experimentConfig["attribute_domains_path"].(string)
+	modelPath := experimentConfig["model_path"].(string)
+	return dataFolderPath, attributeDomainsPath, modelPath
 }
 
 // genNodeLists generates a test list of node informations from the experiments parameters.
@@ -388,13 +375,6 @@ func genConfigForNode(nid sessions.NodeID, nids []sessions.NodeID, threshold int
 		nc.SetupConfig.Protocols.MaxAggregation = 32
 		nc.ComputeConfig.Protocols.MaxAggregation = 32
 	}
-	// } else {
-	// 	var err error
-	// 	nc.SessionParameters[0].Secrets, err = loadSecrets(sessParams, nid)
-	// 	if err != nil {
-	// 		log.Fatalf("could not load node's secrets: %s", err)
-	// 	}
-	// }
 	return
 }
 
@@ -443,28 +423,6 @@ func getInputProvider(params bgv.Parameters, encoder *bgv.Encoder, m int, nodeID
 		return inchan, nil
 
 	}
-}
-
-// checkResultCorrect checks if the result of the circuit evaluation is correct by computing the sum of all input vectors.
-func checkResultCorrect(params bgv.Parameters, encoder *bgv.Encoder, out circuits.Output) error {
-	dataWant := make([]uint64, params.MaxSlots())
-	for i := range dataWant {
-		dataWant[i] = (uint64(i) * uint64(nInputNodes)) % params.PlaintextModulus()
-	}
-
-	pt := &rlwe.Plaintext{Element: out.Ciphertext.Element, Value: out.Ciphertext.Value[0]}
-	pt.IsBatched = true
-	res := make([]uint64, params.MaxSlots())
-	if err := encoder.Decode(pt, res); err != nil {
-		return fmt.Errorf("error decoding result: %v", err)
-	}
-
-	for i, v := range res {
-		if v != dataWant[i] {
-			return fmt.Errorf("incorrect result for %s: \n has %v, want %v\n", out.OperandLabel, res, dataWant)
-		}
-	}
-	return nil
 }
 
 
@@ -681,6 +639,7 @@ func CalculateLeafVector(trees []PerfectBinaryTree, records [][]float64) []uint6
 	leafVector := make([]uint64, numLeaves * 2 * len(trees))
 
 	for i, tree := range trees {
+
 		for _, record := range records {
 			nodeIndex := 0
 			for !tree.Nodes[nodeIndex].IsLeaf {
@@ -691,16 +650,19 @@ func CalculateLeafVector(trees []PerfectBinaryTree, records [][]float64) []uint6
 					nodeIndex = 2*nodeIndex + 2 // go right
 				}
 			}
+
 			leafStart := (1 << tree.Height) - 1
 			leafOffset := nodeIndex - leafStart
 			if leafOffset < 0 || leafOffset >= len(leafVector) {
 				log.Fatalf("Leaf index out of bounds: %d", leafOffset)
 			}
+
 			// class is stored in last element of record
 			recordClass := int(record[len(record)-1])
 			vecIndex := leafOffset*2 + recordClass
-			leafVector[i*numLeaves + vecIndex]++
+			leafVector[i*numLeaves*2 + vecIndex]++
 		}
 	}
 	return leafVector
 }
+

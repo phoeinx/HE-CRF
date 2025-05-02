@@ -105,11 +105,12 @@ def setup_predictive_performance_data():
 
         # Create attribute domains
         # We assume that the last column is the target variable
-        target_col = dataset_df.columns[-1]
+        target_col_index = len(dataset_df.columns) - 1
+        target_col = dataset_df.columns[target_col_index]
         attribute_domains = {
             index: (min(dataset_df[col]), max(dataset_df[col]))
             for index, col in enumerate(dataset_df.columns)
-            if index != target_col
+            if index != target_col_index
         }
         # Write attribute domains to file
         with open(

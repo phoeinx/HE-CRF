@@ -10,6 +10,7 @@ import (
 	"math"
 	"math/rand"
 	"os"
+	"regexp"
 	"strconv"
 	"time"
 
@@ -126,24 +127,32 @@ func main() {
 
 		timeSetup = time.Since(start)
 		fmt.Println("Time Setup", timeSetup)
-
-	
+		
 		start = time.Now()
 		//TODO: Check which file reading we should track
 		attributeDomains := readAttributeDomains(attributeDomainsPath)
+		trees := CreateTreeStructures(attributeDomains, treeDepth, nEstimators)
+
+		numLeaves := (1 << treeDepth) * 2 * nEstimators 
+		numCircuits := (numLeaves + v - 1) / v
+		treesPerCircuit := (nEstimators + numCircuits - 1) / numCircuits
+
 
 		rand.New(rand.NewSource(time.Now().UnixNano()))
 		treeStructureMap := make(map[string]string)
 
 		// sends *expRounds evaluation requests to the server for circuit "vecadd-dec".
-		for nSig := 0; nSig < *expRounds; nSig++ {
-			trees := CreateTreeStructures(attributeDomains, treeDepth, nEstimators)
-			treesString, _ := json.Marshal(trees)
+		for nSig := 0; nSig < numCircuits; nSig++ {
+			startSliceIndex := nSig * treesPerCircuit
+			endSliceIndex := min(startSliceIndex + treesPerCircuit, len(trees))
+			circuitTrees := trees[startSliceIndex : endSliceIndex]
+
+			treesString, _ := json.Marshal(circuitTrees)
 			treeStructureMap[fmt.Sprintf("vecadd-%d", nSig)] = string(treesString)
 		}
 
 		go func() {
-			for nSig := 0; nSig < *expRounds; nSig++ {
+			for nSig := 0; nSig < numCircuits; nSig++ {
 				sigID := fmt.Sprintf("vecadd-%d", nSig)
 				cdescs <- circuits.Descriptor{
 					Signature:   circuits.Signature{Name: "vecadd-dec", Args: map[string]string{"treeStructure": treeStructureMap[sigID]}},
@@ -169,11 +178,12 @@ func main() {
 				log.Fatalf("%s | [main] error decoding output: %v\n", nodeConfig.ID, err)
 			}
 
-			model := createModel(out.CircuitID, treeStructureMap, aggregatedLeafCounts)
+			updateModel(out.CircuitID, trees, treesPerCircuit, aggregatedLeafCounts)
 
-			writeOutModel(modelPath, model, nodeConfig)
 			
 		}
+
+		writeOutModel(modelPath, trees, nodeConfig)
 
 		hsv.GracefulStop() // waits for the last client to disconnect
 		timeCompute = time.Since(start)
@@ -273,16 +283,15 @@ func writeOutModel(modelPath string, model []PerfectBinaryTree, nodeConfig node.
 	return false
 }
 
-func createModel(sigID sessions.CircuitID, treeStructureMap map[string]string, aggregatedLeafCounts []uint64) []PerfectBinaryTree {
-	treeStructure := treeStructureMap[string(sigID)]
-
-	model := make([]PerfectBinaryTree, 0)
-	err := json.Unmarshal([]byte(treeStructure), &model)
+func updateModel(sigID sessions.CircuitID, trees []PerfectBinaryTree, treesPerCircuit int, aggregatedLeafCounts []uint64) {
+	id, err := extractID(string(sigID))
 	if err != nil {
-		log.Fatalf("error unmarshalling tree structure: %v", err)
+		log.Fatalf("error extracting ID from string: %v", err)
 	}
 
-	for treeIndex, tree := range model {
+	treeSlice := trees[id*treesPerCircuit : (id+1)*treesPerCircuit]
+
+	for treeIndex, tree := range treeSlice {
 		firstLeafIndex := (1 << tree.Height) - 1
 		leafCount := 1 << (tree.Height + 1)
 		for leafIndex := firstLeafIndex; leafIndex < len(tree.Nodes); leafIndex++ {
@@ -297,7 +306,7 @@ func createModel(sigID sessions.CircuitID, treeStructureMap map[string]string, a
 
 		}
 	}
-	return model
+
 }
 
 func readExperimentConfig() (string, string, string) {
@@ -544,8 +553,6 @@ func CreateTreeStructure(domains AttributeDomains, height int) PerfectBinaryTree
 
 	// Build tree from top down
 	for nodeIndex := 0; nodeIndex < numSplits; nodeIndex++ {
-		fmt.Println("Node index:", nodeIndex)
-		fmt.Println("Domain constraints:", domainConstraints[nodeIndex])
 		// Select an attribute
 		attributeKey := int(rand.Intn(len(domains)))
 		attrDomain := domainConstraints[nodeIndex][attributeKey]
@@ -635,6 +642,7 @@ func (ad *AttributeDomains) UnmarshalJSON(data []byte) error {
 }
 
 func CalculateLeafVector(trees []PerfectBinaryTree, records [][]float64) []uint64 {
+	fmt.Println("Calculating leaf vector with trees", trees)
 	numLeaves := 1 << trees[0].Height // We expect all trees to have the same height
 	leafVector := make([]uint64, numLeaves * 2 * len(trees))
 
@@ -664,5 +672,11 @@ func CalculateLeafVector(trees []PerfectBinaryTree, records [][]float64) []uint6
 		}
 	}
 	return leafVector
+}
+
+func extractID(s string) (int, error) {
+    re := regexp.MustCompile(`\d+`)
+    match := re.FindString(s)
+    return strconv.Atoi(match)
 }
 

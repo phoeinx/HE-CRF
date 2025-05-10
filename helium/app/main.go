@@ -34,6 +34,8 @@ const cloudAddress = ":40000"
 
 var nInputNodes int = 0
 
+
+
 // defines the command-line flags
 var (
 	nodeId       = flag.String("node_id", "", "the id of the node")
@@ -104,11 +106,16 @@ func main() {
 	// the maximum number of slots in a plaintext and length of the vectors
 	v := params.MaxSlots()
 
+
 	// generates the Helium application (see helium/node/app.go).
 	app := getApp(params)
 
 	// creates a context for the session
 	ctx := sessions.NewBackgroundContext(nodeConfig.SessionParameters[0].ID)
+
+	// creates a random number generator for reproducibility
+	const seed int64 = 42
+	var randGen = rand.New(rand.NewSource(seed))
 
 	// runs Helium as a server or client
 	var timeSetup, timeCompute time.Duration
@@ -131,14 +138,12 @@ func main() {
 		start = time.Now()
 		//TODO: Check which file reading we should track
 		attributeDomains := readAttributeDomains(attributeDomainsPath)
-		trees := CreateTreeStructures(attributeDomains, treeDepth, nEstimators)
+		trees := CreateTreeStructures(attributeDomains, treeDepth, nEstimators, randGen)
 
 		numLeaves := (1 << treeDepth) * 2 * nEstimators 
 		numCircuits := (numLeaves + v - 1) / v
 		treesPerCircuit := (nEstimators + numCircuits - 1) / numCircuits
 
-
-		rand.New(rand.NewSource(time.Now().UnixNano()))
 		treeStructureMap := make(map[string]string)
 
 		// sends *expRounds evaluation requests to the server for circuit "vecadd-dec".
@@ -518,18 +523,18 @@ type AttributeDomain struct {
 
 type AttributeDomains map[int]AttributeDomain
 
-func CreateTreeStructures(domains AttributeDomains, height int, count int) []PerfectBinaryTree {
+func CreateTreeStructures(domains AttributeDomains, height int, count int, randGen *rand.Rand) []PerfectBinaryTree {
 	trees := make([]PerfectBinaryTree, 0)
 
 	for i := 0; i < count; i++ {
-		tree := CreateTreeStructure(domains, height)
+		tree := CreateTreeStructure(domains, height, randGen)
 		trees = append(trees, tree)
 	}
 
 	return trees
 }
 
-func CreateTreeStructure(domains AttributeDomains, height int) PerfectBinaryTree {
+func CreateTreeStructure(domains AttributeDomains, height int, randGen *rand.Rand) PerfectBinaryTree {
 	numSplits := int(math.Pow(2, float64(height))) - 1
 	nodes := make([]Node, numSplits*2+1)
 
@@ -553,8 +558,13 @@ func CreateTreeStructure(domains AttributeDomains, height int) PerfectBinaryTree
 
 	// Build tree from top down
 	for nodeIndex := 0; nodeIndex < numSplits; nodeIndex++ {
+		if len(domains) == 0 {
+			// No more attributes to split on, implementation cannot handle this case
+			log.Fatal("No more attributes to split on")
+		}
+		
 		// Select an attribute
-		attributeKey := int(rand.Intn(len(domains)))
+		attributeKey := int(randGen.Intn(len(domains), ))
 		attrDomain := domainConstraints[nodeIndex][attributeKey]
 
 		// Generate threshold within constrained domain
@@ -563,7 +573,7 @@ func CreateTreeStructure(domains AttributeDomains, height int) PerfectBinaryTree
 			log.Fatal("Invalid domain for attribute, cannot split further")
 		}
 
-		threshold := attrDomain.Min + rand.Float64()*(attrDomain.Max-attrDomain.Min)
+		threshold := attrDomain.Min + randGen.Float64()*(attrDomain.Max-attrDomain.Min)
 		nodes[nodeIndex] = Node{
 			AttributeIndex: attributeKey,
 			Threshold:      threshold,
@@ -575,19 +585,31 @@ func CreateTreeStructure(domains AttributeDomains, height int) PerfectBinaryTree
 
 		if leftChildIndex < len(nodes) {
 			domainConstraints[leftChildIndex] = copyDomains(domainConstraints[nodeIndex])
-			domainConstraints[leftChildIndex][attributeKey] = AttributeDomain{
-				Min: attrDomain.Min,
-				Max: threshold,
+			if attrDomain.Min == threshold {
+				// remove attribute domain for left child
+				delete(domainConstraints[leftChildIndex], attributeKey)
+			} else {
+				domainConstraints[leftChildIndex][attributeKey] = AttributeDomain{
+					Min: attrDomain.Min,
+					Max: threshold,
+				}
 			}
 		}
 		if rightChildIndex < len(nodes) {
 			domainConstraints[rightChildIndex] = copyDomains(domainConstraints[nodeIndex])
-			domainConstraints[rightChildIndex][attributeKey] = AttributeDomain{
-				Min: threshold,
-				Max: attrDomain.Max,
+			if attrDomain.Max == threshold {
+				// remove attribute domain for right child
+				delete(domainConstraints[rightChildIndex], attributeKey)
+			} else {
+				domainConstraints[rightChildIndex][attributeKey] = AttributeDomain{
+					Min: threshold,
+					Max: attrDomain.Max,
+				}
 			}
 		}
 	}
+
+
 
 	// Add leaf nodes
 	for i := numSplits; i < len(nodes); i++ {

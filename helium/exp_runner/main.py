@@ -35,9 +35,9 @@ SKIP_TO = 0  # starts from a specific experiment number in the grid
 EXP_MODE = "predictive_performance"  # "predictive_performance" or "runtime_performance"
 
 # ====== Experiment Grid ======
-N_PARTIES = [10]  # the number of session nodes
-NUMBER_ESTIMATORS = [1000]
-TREE_DEPTH = [8]
+N_PARTIES = [2, 5, 10, 50]  # the number of session nodes
+NUMBER_ESTIMATORS = [1, 10, 100, 500]
+TREE_DEPTH = [1, 3, 5]
 THRESH_VALUES = [1]  # the cryptographic threshold in percentage of the number of nodes
 FAILURE_RATES = [0]  # the failure rate in fail/min
 FAILURE_DURATIONS = [
@@ -48,8 +48,20 @@ RANDOM_SEED = 0  # Random state for the StratifiedKFold
 EXPERIMENTS_FOLDER = "helium/exp_runner/data/experiments"
 DATASETS_FOLDER = "helium/exp_runner/data/datasets"
 DATASETS = [
-    "preprocessed_breast_cancer.csv"
+    "preprocessed_Ionosphere.csv",
+    "preprocessed_Haberman's Survival.csv",
+    "preprocessed_Breast Cancer Wisconsin (Prognostic).csv",
+    "preprocessed_LTD.csv",
+    "preprocessed_Mammographic Mass.csv",
+    "preprocessed_Breast Cancer Wisconsin (Diagnostic).csv",
+    "preprocessed_TCGA.csv",
+    "preprocessed_MAGIC Gamma Telescope.csv",
+    "preprocessed_Blood Transfusion Service Center.csv",
+    "preprocessed_Musk (Version 2).csv",
+    "preprocessed_Breast Cancer Wisconsin (Original).csv",
+    "preprocessed_Spambase.csv",
 ]  # list all datasets that you want to use for the experiment, in runtime mode only one dataset is accepted
+# only run numerical datasets, categorical datasets are not supported yet
 
 # ====== Predictive Performance Parameters (only for the predictive_performance mode) ======
 EXPERIMENT_NAME = (
@@ -243,136 +255,133 @@ for i, (exp, rep) in enumerate(product(exps_to_run, range(N_REP))):
         % (n_party, thresh, mean_failure_per_min, rep)
     )
 
-    # Step 1: We need to pass fold number to the system if we want to run the predictive performance mode, optional or just otherwise always 1?
-    # Step 2: mount the data folder to the docker container
-    # Step 3: Adjust the paths in the docker container & store the data in the mounted data folder
-    # Step 4: Profit
-    for N_FOLD in range(N_SPLITS):
-        # write out experiment_config
-        print(f"Running experiment {N_FOLD} for dataset {dataset}")
+    for dataset_index, dataset in enumerate(DATASETS):
+        for N_FOLD in range(N_SPLITS):
+            # write out experiment_config
+            try:
+                print(f"Running experiment {N_FOLD} for dataset {dataset}")
 
-        docker_mounted_experiments_folder = "/helium/data/experiments"
-        experiment_config = {
-            "data_folder_path": os.path.join(
-                docker_mounted_experiments_folder,
-                EXPERIMENT_NAME,
-                DATASETS[0].split(".")[0],
-                "party_data",
-                f"fold_{N_FOLD}",
-            ),
-            "attribute_domains_path": os.path.join(
-                docker_mounted_experiments_folder,
-                EXPERIMENT_NAME,
-                DATASETS[0].split(".")[0],
-                "attribute_domains.json",
-            ),
-            "model_path": os.path.join(
-                docker_mounted_experiments_folder,
-                EXPERIMENT_NAME,
-                DATASETS[0].split(".")[0],
-                "models",
-                f"model_{DATASETS[0].split('.')[0]}_fold_{N_FOLD}_parties_{n_party}_estimators_{n_estimators}_depth_{tree_depth}.json",
-            ),
-        }
+                docker_mounted_experiments_folder = "/helium/data/experiments"
+                experiment_config = {
+                    "data_folder_path": os.path.join(
+                        docker_mounted_experiments_folder,
+                        EXPERIMENT_NAME,
+                        DATASETS[dataset_index].split(".")[0],
+                        "party_data",
+                        f"fold_{N_FOLD}",
+                    ),
+                    "attribute_domains_path": os.path.join(
+                        docker_mounted_experiments_folder,
+                        EXPERIMENT_NAME,
+                        DATASETS[dataset_index].split(".")[0],
+                        "attribute_domains.json",
+                    ),
+                    "model_path": os.path.join(
+                        docker_mounted_experiments_folder,
+                        EXPERIMENT_NAME,
+                        DATASETS[dataset_index].split(".")[0],
+                        "models",
+                        f"model_{DATASETS[dataset_index].split('.')[0]}_fold_{N_FOLD}_parties_{n_party}_estimators_{n_estimators}_depth_{tree_depth}.json",
+                    ),
+                }
 
-        print("Writing out experiment config for ", N_FOLD)
+                print("Writing out experiment config for ", N_FOLD)
 
-        with open(
-            os.path.join(
-                EXPERIMENTS_FOLDER,
-                "experiment_config.json",
-            ),
-            "w",
-        ) as f:
-            json.dump(experiment_config, f)
+                with open(
+                    os.path.join(
+                        EXPERIMENTS_FOLDER,
+                        "experiment_config.json",
+                    ),
+                    "w",
+                ) as f:
+                    json.dump(experiment_config, f)
 
-            f.flush()
-            os.fsync(f.fileno())
+                    f.flush()
+                    os.fsync(f.fileno())
 
-        time.sleep(1)
+                time.sleep(1)
 
-        system = DockerNodeSystem(
-            n_party,
-            thresh,
-            PARTIES_HOST,
-            CLOUD_HOST,
-            RATE_LIMIT,
-            DELAY,
-            EVAL_COUNT,
-            n_estimators,
-            tree_depth,
-            N_FOLD,
-        )
+                system = DockerNodeSystem(
+                    n_party,
+                    thresh,
+                    PARTIES_HOST,
+                    CLOUD_HOST,
+                    RATE_LIMIT,
+                    DELAY,
+                    EVAL_COUNT,
+                    n_estimators,
+                    tree_depth,
+                    N_FOLD,
+                )
 
-        churn_sim = NodeSystemSimulation(
-            n_party,
-            mean_failure_per_min,
-            mean_failure_duration,
-            EPOCH_TIME,
-            on_failure=system.kill_player,
-            on_reconnect=system.start_player,
-            initial_online=thresh if START_WITH_THRESH else None,
-        )
+                churn_sim = NodeSystemSimulation(
+                    n_party,
+                    mean_failure_per_min,
+                    mean_failure_duration,
+                    EPOCH_TIME,
+                    on_failure=system.kill_player,
+                    on_reconnect=system.start_player,
+                    initial_online=thresh if START_WITH_THRESH else None,
+                )
 
-        time.sleep(5)  # lets the thing clean
+                time.sleep(5)  # lets the thing clean
 
-        exp_terminated = threading.Event()
+                exp_terminated = threading.Event()
 
-        def excepthook(args):
+                def excepthook(args):
+                    time.sleep(2)
+                    if not exp_terminated.is_set():
+                        raise Exception(
+                            "Got exception of type %s value %s during experiment"
+                            % (args.exc_type, args.exc_value)
+                        )
+
+                threading.excepthook = excepthook
+
+                cloud = system.start_cloud()
+
+                churn_sim.run_simulation()
+
+                stats = get_stats(cloud, print=True)
+                exp_desc = OrderedDict(
+                    [
+                        ("threshold", thresh),
+                        ("failure_rate", mean_failure_per_min),
+                        ("rep", rep),
+                    ]
+                    + [item for item in stats.items()]
+                    + [
+                        ("failure_duration", mean_failure_duration),
+                        ("exp", "helium"),
+                        ("n_party", n_party),
+                        ("rate_limit", RATE_LIMIT),
+                        ("delay", DELAY),
+                        ("theoretical_node_online", churn_sim.expected_online_nodes()),
+                        (
+                            "theoretical_time_above_thresh",
+                            churn_sim.expected_time_above_threshold(thresh),
+                        ),
+                        ("actual_node_online", churn_sim.online_nodes()),
+                        (
+                            "actual_time_above_thresh",
+                            churn_sim.time_above_threshold(thresh),
+                        ),
+                    ]
+                )
+
+                if churn_sim.failed_fail > 0 or churn_sim.failed_rec > 0:
+                    print(
+                        "Warning: churn simulation got %d failed failures and %d failed reconnect"
+                        % (churn_sim.failed_fail, churn_sim.failed_rec)
+                    )
+
+                print(json.dumps(exp_desc), flush=True)
+            except Exception as e:
+                log(e)
+                sys.exit(1)
+            finally:
+                exp_terminated.set()
+                churn_sim.stop()
+                system.clean_all()
+
             time.sleep(2)
-            if not exp_terminated.is_set():
-                raise Exception(
-                    "Got exception of type %s value %s during experiment"
-                    % (args.exc_type, args.exc_value)
-                )
-
-        threading.excepthook = excepthook
-
-        cloud = system.start_cloud()
-
-        churn_sim.run_simulation()
-
-        try:
-            stats = get_stats(cloud, print=True)
-            exp_desc = OrderedDict(
-                [
-                    ("threshold", thresh),
-                    ("failure_rate", mean_failure_per_min),
-                    ("rep", rep),
-                ]
-                + [item for item in stats.items()]
-                + [
-                    ("failure_duration", mean_failure_duration),
-                    ("exp", "helium"),
-                    ("n_party", n_party),
-                    ("rate_limit", RATE_LIMIT),
-                    ("delay", DELAY),
-                    ("theoretical_node_online", churn_sim.expected_online_nodes()),
-                    (
-                        "theoretical_time_above_thresh",
-                        churn_sim.expected_time_above_threshold(thresh),
-                    ),
-                    ("actual_node_online", churn_sim.online_nodes()),
-                    (
-                        "actual_time_above_thresh",
-                        churn_sim.time_above_threshold(thresh),
-                    ),
-                ]
-            )
-
-            if churn_sim.failed_fail > 0 or churn_sim.failed_rec > 0:
-                print(
-                    "Warning: churn simulation got %d failed failures and %d failed reconnect"
-                    % (churn_sim.failed_fail, churn_sim.failed_rec)
-                )
-
-            print(json.dumps(exp_desc), flush=True)
-        except Exception as e:
-            log(e)
-            sys.exit(1)
-        finally:
-            exp_terminated.set()
-            churn_sim.stop()
-            system.clean_all()
-
-        time.sleep(2)

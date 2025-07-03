@@ -25,6 +25,7 @@ class DockerNodeSystem:
         n_estimators,
         tree_depth,
         fold,
+        non_participation_prob,
     ):
         self.N = N
         self.T = T
@@ -33,6 +34,7 @@ class DockerNodeSystem:
         self.circuit_rounds = circuit_rounds
         self.n_estimators = n_estimators
         self.tree_depth = tree_depth
+        self.non_participation_prob = non_participation_prob
         self.parties_host = parties_host
         self.cloud_host = cloud_host
         self.fold = fold
@@ -74,7 +76,7 @@ class DockerNodeSystem:
 
     def start_cloud(self):
         cmd = (
-            "-node_id cloud -n_party %d -threshold %d -cloud_address %s -expRounds %d -nEstimators %d -treeDepth %d"
+            "-node_id cloud -n_party %d -threshold %d -cloud_address %s -expRounds %d -nEstimators %d -treeDepth %d -nonParticipationProb %f"
             % (
                 self.N,
                 self.T,
@@ -82,6 +84,7 @@ class DockerNodeSystem:
                 self.circuit_rounds,
                 self.n_estimators,
                 self.tree_depth,
+                self.non_participation_prob,
             )
         )
         net = "expnet" if self.cloud_docker_host == self.parties_docker_host else "host"
@@ -112,7 +115,17 @@ class DockerNodeSystem:
     def create_player(self, i):
         container_name = "node-%d" % i
         cloud_host = "cloud" if self.cloud_host == 'localhost' else self.cloud_host
-        cmd = "./shape_traffic_and_start.sh -node_id node-%d -n_party %d -threshold %d -cloud_address %s -expRounds %d" % (i, self.N, self.T, "%s:40000" % cloud_host, self.circuit_rounds)
+        cmd = (
+            "./shape_traffic_and_start.sh -node_id node-%d -n_party %d -threshold %d -cloud_address %s -expRounds %d -nonParticipationProb %f"
+            % (
+                i,
+                self.N,
+                self.T,
+                f"{cloud_host}:40000",
+                self.circuit_rounds,
+                self.non_participation_prob,
+            )
+        )
         caps = ["NET_ADMIN"]
         net = "expnet"
         env = {"RATE_LIMIT": self.rate_limit, "DELAY": self.delay}

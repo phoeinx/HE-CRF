@@ -16,7 +16,6 @@ class NodeSystemSimulation:
         self.epoch_duration = epoch_duration
         self.lambda_r = 1 / (avg_reconnection_time * 60)
         self.lambda_f = (-system_failure_rate/60*self.lambda_r)/((system_failure_rate / 60) - (N-1) *self.lambda_r)
-        
 
         # Setting up initial online nodes
         if initial_online is None:
@@ -35,13 +34,15 @@ class NodeSystemSimulation:
         self.failed_fail = 0
         self.failed_rec = 0
 
+        log("NodeSystemSimulation initialized.")
+
     def default_failure_action(self, node_id):
         None
-        #print(f"Node {node_id} failed.")
+        # print(f"Node {node_id} failed.")
 
     def default_reconnect_action(self, node_id):
         None
-        #print(f"Node {node_id} reconnected.")
+        # print(f"Node {node_id} reconnected.")
 
     def run_epoch(self):
         nfail = 0
@@ -86,13 +87,13 @@ class NodeSystemSimulation:
                 log("epoch time %.2f longer than epoch duration %.2f" % (epoch_time, self.epoch_duration) )
 
     def run_simulation(self, total_epochs=None, live=True):
-        
+
         node_to_start = [i for i, online in enumerate(self.nodes) if online]
         log("starting %d nodes: %s..." % (len(node_to_start), node_to_start))
         start_threads = [threading.Thread(target=self.on_reconnect, args=(i,)) for i in node_to_start]
         [thr.start() for thr in start_threads]
         [thr.join() for thr in start_threads]
-        
+
         if total_epochs is None:
             self.simulation_thread = threading.Thread(target=self.simulation_loop, args=(live,))
             self.simulation_thread.start()
@@ -117,13 +118,13 @@ class NodeSystemSimulation:
         # Expected fraction of time with at least T online nodes
         p_online = 1 / (self.lambda_f * self.avg_reconnection_time_sec + 1)
         return sum(comb(self.N-1, k) * p_online**k * (1 - p_online)**((self.N - 1) - k) for k in range(T-1, (self.N -1) + 1))
-    
+
     def online_nodes(self):
         return sum(self.stats_online)/len(self.stats_online)
-    
+
     def time_above_threshold(self, T):
         return sum([1 for n_online in self.stats_online if n_online >= T])/len(self.stats_online)
-    
+
     def avg_fail_per_epoch(self):
         return sum(self.stats_fail)/len(self.stats_fail)
 
@@ -132,7 +133,7 @@ class NodeSystemSimulation:
 
     def fail_per_min(self):
         return (self.avg_fail_per_epoch()/self.epoch_duration)*60
-    
+
     def rec_per_min(self):
         return (self.avg_rec_per_epoch()/self.epoch_duration)*60
 
@@ -158,4 +159,3 @@ if __name__ == '__main__':
         simulation.fail_per_min(),
         simulation.rec_per_min()
         ))
-

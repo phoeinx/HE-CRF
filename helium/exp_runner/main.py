@@ -35,8 +35,8 @@ SKIP_TO = 0  # starts from a specific experiment number in the grid
 EXP_MODE = "predictive_performance"  # "predictive_performance" or "runtime_performance"
 
 # ====== Experiment Grid ======
-N_PARTIES = [2, 5, 10, 50]  # the number of session nodes
-NUMBER_ESTIMATORS = [1, 10, 100, 500]
+N_PARTIES = [2, 10, 100]
+NUMBER_ESTIMATORS = [10, 100]  # [1, 10, 100, 500]
 TREE_DEPTH = [1, 3, 5]
 THRESH_VALUES = [1]  # the cryptographic threshold in percentage of the number of nodes
 FAILURE_RATES = [0]  # the failure rate in fail/min
@@ -48,18 +48,18 @@ RANDOM_SEED = 0  # Random state for the StratifiedKFold
 EXPERIMENTS_FOLDER = "helium/exp_runner/data/experiments"
 DATASETS_FOLDER = "helium/exp_runner/data/datasets"
 DATASETS = [
-    "preprocessed_Ionosphere.csv",
-    "preprocessed_Haberman's Survival.csv",
-    "preprocessed_Breast Cancer Wisconsin (Prognostic).csv",
-    "preprocessed_LTD.csv",
-    "preprocessed_Mammographic Mass.csv",
+    # "preprocessed_Ionosphere.csv",
+    # "preprocessed_Haberman's Survival.csv",
+    # "preprocessed_Breast Cancer Wisconsin (Prognostic).csv",
+    # "preprocessed_LTD.csv",
+    # "preprocessed_Mammographic Mass.csv",
     "preprocessed_Breast Cancer Wisconsin (Diagnostic).csv",
-    "preprocessed_TCGA.csv",
-    "preprocessed_MAGIC Gamma Telescope.csv",
-    "preprocessed_Blood Transfusion Service Center.csv",
-    "preprocessed_Musk (Version 2).csv",
-    "preprocessed_Breast Cancer Wisconsin (Original).csv",
-    "preprocessed_Spambase.csv",
+    # "preprocessed_TCGA.csv",
+    # "preprocessed_MAGIC Gamma Telescope.csv",
+    # "preprocessed_Blood Transfusion Service Center.csv",
+    # "preprocessed_Musk (Version 2).csv",
+    # "preprocessed_Breast Cancer Wisconsin (Original).csv",
+    # "preprocessed_Spambase.csv",
 ]  # list all datasets that you want to use for the experiment, in runtime mode only one dataset is accepted
 # only run numerical datasets, categorical datasets are not supported yet
 
@@ -74,6 +74,7 @@ EXPERIMENT_FOLDER = os.path.join(
 
 N_SPLITS = 10  # Number of splits for the cross-validation with a StratifiedKFold
 FOLD_RANDOM_SEED = 0  # Random state for the StratifiedKFold
+NON_PARTICIPATION_PROB = [0.75]
 
 
 def log(str, end="\n"):
@@ -158,10 +159,10 @@ def setup_predictive_performance_data():
 log("Computing experiments...")
 
 
-if EXP_MODE == "predictive_performance":
-    log("Predictive performance mode")
-    log("Setting up predictive performance data")
-    setup_predictive_performance_data()
+# if EXP_MODE == "predictive_performance":
+#     log("Predictive performance mode")
+#     log("Setting up predictive performance data")
+setup_predictive_performance_data()
 
 
 exps_to_run = []
@@ -172,6 +173,7 @@ for (
     mean_failure_duration,
     n_estimators,
     tree_depth,
+    non_participation_prob,
 ) in product(
     N_PARTIES,
     THRESH_VALUES,
@@ -179,8 +181,8 @@ for (
     FAILURE_DURATIONS,
     NUMBER_ESTIMATORS,
     TREE_DEPTH,
+    NON_PARTICIPATION_PROB,
 ):
-
     thresh = round(n_party * thresh)
     sim = NodeSystemSimulation(
         n_party, mean_failure_per_min, mean_failure_duration, EPOCH_TIME
@@ -199,6 +201,7 @@ for (
             mean_failure_duration,
             n_estimators,
             tree_depth,
+            non_participation_prob,
         )
     )
 log("%d experiments to run" % (len(exps_to_run)*N_REP))
@@ -215,6 +218,7 @@ for i, (exp, rep) in enumerate(product(exps_to_run, range(N_REP))):
         mean_failure_duration,
         n_estimators,
         tree_depth,
+        non_participation_prob,
     ) = exp
 
     # Create party chunks
@@ -259,7 +263,6 @@ for i, (exp, rep) in enumerate(product(exps_to_run, range(N_REP))):
         for N_FOLD in range(N_SPLITS):
             # write out experiment_config
             try:
-                print(f"Running experiment {N_FOLD} for dataset {dataset}")
 
                 docker_mounted_experiments_folder = "/helium/data/experiments"
                 experiment_config = {
@@ -281,11 +284,9 @@ for i, (exp, rep) in enumerate(product(exps_to_run, range(N_REP))):
                         EXPERIMENT_NAME,
                         DATASETS[dataset_index].split(".")[0],
                         "models",
-                        f"model_{DATASETS[dataset_index].split('.')[0]}_fold_{N_FOLD}_parties_{n_party}_estimators_{n_estimators}_depth_{tree_depth}.json",
+                        f"model_{DATASETS[dataset_index].split('.')[0]}_fold_{N_FOLD}_parties_{n_party}_estimators_{n_estimators}_depth_{tree_depth}_non_part_prob_{non_participation_prob}.json",
                     ),
                 }
-
-                print("Writing out experiment config for ", N_FOLD)
 
                 with open(
                     os.path.join(
@@ -312,6 +313,7 @@ for i, (exp, rep) in enumerate(product(exps_to_run, range(N_REP))):
                     n_estimators,
                     tree_depth,
                     N_FOLD,
+                    non_participation_prob,
                 )
 
                 churn_sim = NodeSystemSimulation(

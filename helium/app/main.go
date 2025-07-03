@@ -32,10 +32,6 @@ import (
 // cloudAddress is the local address that the cloud node listens on.
 const cloudAddress = ":40000"
 
-var nInputNodes int = 0
-
-
-
 // defines the command-line flags
 var (
 	nodeId       = flag.String("node_id", "", "the id of the node")
@@ -45,6 +41,7 @@ var (
 	expRounds    = flag.Int("expRounds", 1, "number of circuit evaluation rounds to perform")
 	nEstimators  = flag.Int("nEstimators", 100, "number of estimators to use for Completely Random Forest")
 	treeDepth   = flag.Int("treeDepth", 3, "depth of the trees")
+	nonParticipationProb = flag.Float64("nonParticipationProb", -1, "probability of a node not participating in the evaluation of a record (default: 0.0, i.e., all nodes participate)")
 )
 
 func main() {
@@ -70,9 +67,13 @@ func main() {
 		panic("treeDepth argument should be provided and > 1")
 	}
 
-	nInputNodes = *nParty
+	if *nonParticipationProb < 0.0 || *nonParticipationProb > 1.0 {
+		panic("nonParticipationProb argument must be between 0.0 and 1.0")
+	}
+
 	nEstimators := *nEstimators
 	treeDepth := *treeDepth
+	nonParticipationProb := *nonParticipationProb
 
 	// sets the threshold to the number of parties if not provided
 	var threshold int
@@ -106,6 +107,8 @@ func main() {
 	// the maximum number of slots in a plaintext and length of the vectors
 	v := params.MaxSlots()
 
+	fmt.Println("Max slots", v)
+
 
 	// generates the Helium application (see helium/node/app.go).
 	app := getApp(params)
@@ -136,17 +139,16 @@ func main() {
 		fmt.Println("Time Setup", timeSetup)
 		
 		start = time.Now()
-		//TODO: Check which file reading we should track
-		attributeDomains := readAttributeDomains(attributeDomainsPath)
+		attributeDomains := ReadAttributeDomains(attributeDomainsPath)
 		trees := CreateTreeStructures(attributeDomains, treeDepth, nEstimators, randGen)
 
+		// Calculate the number of trees that can be calculated in one circuit
 		numLeaves := (1 << treeDepth) * 2 * nEstimators 
 		numCircuits := (numLeaves + v - 1) / v
 		treesPerCircuit := (nEstimators + numCircuits - 1) / numCircuits
 
+		// Split tree structures into chunks per circuit and transform them to JSON Strings to pass them as arguments
 		treeStructureMap := make(map[string]string)
-
-		// sends *expRounds evaluation requests to the server for circuit "vecadd-dec".
 		for nSig := 0; nSig < numCircuits; nSig++ {
 			startSliceIndex := nSig * treesPerCircuit
 			endSliceIndex := min(startSliceIndex + treesPerCircuit, len(trees))
@@ -160,7 +162,7 @@ func main() {
 			for nSig := 0; nSig < numCircuits; nSig++ {
 				sigID := fmt.Sprintf("vecadd-%d", nSig)
 				cdescs <- circuits.Descriptor{
-					Signature:   circuits.Signature{Name: "vecadd-dec", Args: map[string]string{"treeStructure": treeStructureMap[sigID]}},
+					Signature:   circuits.Signature{Name: "vecadd-dec", Args: map[string]string{"treeStructures": treeStructureMap[sigID], "n_party": strconv.Itoa(*nParty)}},
 					CircuitID:   sessions.CircuitID(sigID),
 					NodeMapping: nodeMapping,
 					Evaluator:   "cloud",
@@ -184,7 +186,6 @@ func main() {
 			}
 
 			updateModel(out.CircuitID, trees, treesPerCircuit, aggregatedLeafCounts)
-
 			
 		}
 
@@ -204,7 +205,7 @@ func main() {
 		records := readNodeData(dataFolderPath, nid)
 
 		encoder := bgv.NewEncoder(params)
-		var ip compute.InputProvider = getInputProvider(params, encoder, v, nid, records)
+		var ip compute.InputProvider = getInputProvider(params, encoder, v, nid, records, nonParticipationProb)
 		secrets := loadSecrets(nodeConfig.SessionParameters[0], nid)
 
 		// runs the Helium client. The method returns a channel to receive the evaluation outputs
@@ -380,7 +381,7 @@ func genConfigForNode(nid sessions.NodeID, nids []sessions.NodeID, threshold int
 		},
 		ComputeConfig: compute.ServiceConfig{
 			MaxCircuitEvaluation: 10,
-			Protocols:            protocols.ExecutorConfig{MaxProtoPerNode: 3, MaxParticipation: 3, MaxAggregation: 1},
+			Protocols:            protocols.ExecutorConfig{MaxProtoPerNode: 32, MaxParticipation: 32, MaxAggregation: 32},
 		},
 	}
 
@@ -398,7 +399,7 @@ func getApp(params bgv.Parameters) node.App {
 	return node.App{
 		SetupDescription: &setup.Description{
 			Cpk: true,
-			Rlk: false, //TODO: where does relinearization key become necessary? shouldn't
+			Rlk: false,
 			Gks: []uint64{},
 		},
 		Circuits: map[circuits.Name]circuits.Circuit{
@@ -409,10 +410,10 @@ func getApp(params bgv.Parameters) node.App {
 
 // getInputProvider generates an input provider function for the node. The input provider function
 // is registered to with the Helium node and is called by Helium to provide the input for the circuit evaluation.
-func getInputProvider(params bgv.Parameters, encoder *bgv.Encoder, m int, nodeID sessions.NodeID, records [][]float64 ) compute.InputProvider {
+func getInputProvider(params bgv.Parameters, encoder *bgv.Encoder, m int, nodeID sessions.NodeID, records [][]float64, nonParticipationProb float64) compute.InputProvider {
 	return func(ctx context.Context, sess sessions.Session, cd circuits.Descriptor) (chan circuits.Input, error) {
 
-		treesString := cd.Signature.Args["treeStructure"]
+		treesString := cd.Signature.Args["treeStructures"]
 		//Unmarshal array of PerfectBinaryTrees
 		treeStructures := make([]PerfectBinaryTree, 0)
 		err := json.Unmarshal([]byte(treesString), &treeStructures)
@@ -421,7 +422,7 @@ func getInputProvider(params bgv.Parameters, encoder *bgv.Encoder, m int, nodeID
 		}
 
 		// filter records
-		leafVector := CalculateLeafVector(treeStructures, records)
+		leafVector := CalculateLeafVector(treeStructures, records, nonParticipationProb)
 
 		encoder := encoder.ShallowCopy()
 		pt := bgv.NewPlaintext(params, params.MaxLevelQ())
@@ -442,8 +443,14 @@ func getInputProvider(params bgv.Parameters, encoder *bgv.Encoder, m int, nodeID
 
 func vecAddDec(rt circuits.Runtime) error {
 
-	nodeCount := nInputNodes
+	nodeCountParam := rt.Circuit().Signature.Args["n_party"]
+	//converts the string to an int
+	nodeCount, err := strconv.Atoi(nodeCountParam)
+	if err != nil {
+		log.Fatalf("error converting nodeCount to int: %v", err)
+	}
 	inputs := make(map[int]*circuits.FutureOperand)
+
 	
 	for i := 0; i < nodeCount; i++ {
 		inputs[i] = rt.Input(circuits.OperandLabel(fmt.Sprintf("//node-%d/vec", i)))
@@ -623,7 +630,7 @@ func CreateTreeStructure(domains AttributeDomains, height int, randGen *rand.Ran
 	return PerfectBinaryTree{Nodes: nodes, Height: height}
 }
 
-func readAttributeDomains(filename string) AttributeDomains {
+func ReadAttributeDomains(filename string) AttributeDomains {
 
 	data, err := os.ReadFile(filename)
 	if err != nil {
@@ -663,7 +670,7 @@ func (ad *AttributeDomains) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func CalculateLeafVector(trees []PerfectBinaryTree, records [][]float64) []uint64 {
+func CalculateLeafVector(trees []PerfectBinaryTree, records [][]float64, nonParticipatingProb float64) []uint64 {
 	fmt.Println("Calculating leaf vector with trees", trees)
 	numLeaves := 1 << trees[0].Height // We expect all trees to have the same height
 	leafVector := make([]uint64, numLeaves * 2 * len(trees))
@@ -671,6 +678,11 @@ func CalculateLeafVector(trees []PerfectBinaryTree, records [][]float64) []uint6
 	for i, tree := range trees {
 
 		for _, record := range records {
+			// Simulate non-participation
+			// if rand.Float64() < nonParticipatingProb {
+			// 	fmt.Println("Node skipped record", i, "due to non-participation probability")
+			// 	continue
+			// }
 			nodeIndex := 0
 			for !tree.Nodes[nodeIndex].IsLeaf {
 				node := tree.Nodes[nodeIndex]
@@ -691,6 +703,19 @@ func CalculateLeafVector(trees []PerfectBinaryTree, records [][]float64) []uint6
 			recordClass := int(record[len(record)-1])
 			vecIndex := leafOffset*2 + recordClass
 			leafVector[i*numLeaves*2 + vecIndex]++
+		}
+	}
+
+	// Randomly select nonParticipating Leaves based on the nonParticipationProb, create signal vector
+	// TODO: Why is this not applied?
+	numLeavesInTrees := len(trees) * numLeaves
+	for i := 0; i < numLeavesInTrees; i++  {
+		leafIndex := i * 2
+		randFloat := rand.Float64()
+		if randFloat < nonParticipatingProb {
+			fmt.Println("random float", randFloat, "is less than nonParticipatingProb", nonParticipatingProb, "skipping leaf", i)
+			leafVector[leafIndex] = 0 // Simulate non-participation by setting the count to 0
+			leafVector[leafIndex+1] = 0 // Set both classes to 0
 		}
 	}
 	return leafVector

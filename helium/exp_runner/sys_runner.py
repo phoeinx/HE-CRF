@@ -51,7 +51,7 @@ class DockerNodeSystem:
                 "expnet",
                 driver="bridge",
                 ipam=docker.types.IPAMConfig(
-                    pool_configs=[docker.types.IPAMPool(subnet="192.168.0.0/16")]
+                    pool_configs=[docker.types.IPAMPool(subnet="10.160.0.0/16")]
                 ),
             )
 

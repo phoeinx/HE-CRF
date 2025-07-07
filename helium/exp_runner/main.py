@@ -302,9 +302,13 @@ for i, (exp, rep) in enumerate(product(exps_to_run, range(N_REP))):
                     f.flush()
                     os.fsync(f.fileno())
 
+                REMOTE_FOLDER = os.path.join(
+                    "sc", "home", "theresa.hradilak", "HE-CRF", EXPERIMENTS_FOLDER
+                )
+
                 if PARTIES_HOST != CLOUD_HOST:
                     remote_target = (
-                        f"{CLOUD_HOST}:{EXPERIMENTS_FOLDER}/experiment_config.json"
+                        f"{CLOUD_HOST}:{REMOTE_FOLDER}/experiment_config.json"
                     )
                     try:
                         subprocess.run(["scp", local_path, remote_target], check=True)

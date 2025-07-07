@@ -352,7 +352,7 @@ func genNodeLists(nParty int, cloudAddr string) (nids []sessions.NodeID, nl node
 	nl = append(nl, struct {
 		sessions.NodeID
 		node.Address
-	}{NodeID: "cloud", Address: node.Address("cloud:40000")})
+	}{NodeID: "cloud", Address: node.Address(cloudAddr)})
 	return
 }
 

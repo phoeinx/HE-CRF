@@ -80,7 +80,11 @@ class DockerNodeSystem:
             % (
                 self.N,
                 self.T,
-                "%s:40000" % self.cloud_host,
+                (
+                    "%s:40000" % self.cloud_host
+                    if self.cloud_host != "localhost"
+                    else "cloud:40000"
+                ),
                 self.circuit_rounds,
                 self.n_estimators,
                 self.tree_depth,

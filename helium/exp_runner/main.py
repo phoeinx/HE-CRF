@@ -35,9 +35,9 @@ SKIP_TO = 0  # starts from a specific experiment number in the grid
 EXP_MODE = "predictive_performance"  # "predictive_performance" or "runtime_performance"
 
 # ====== Experiment Grid ======
-N_PARTIES = [2, 10, 100]
-NUMBER_ESTIMATORS = [10, 100]  # [1, 10, 100, 500]
-TREE_DEPTH = [1, 3, 5]
+N_PARTIES = [2, 5, 10, 50, 100, 250]
+NUMBER_ESTIMATORS = [100]
+TREE_DEPTH = [3, 5, 7]
 THRESH_VALUES = [1]  # the cryptographic threshold in percentage of the number of nodes
 FAILURE_RATES = [0]  # the failure rate in fail/min
 FAILURE_DURATIONS = [
@@ -48,17 +48,17 @@ RANDOM_SEED = 0  # Random state for the StratifiedKFold
 EXPERIMENTS_FOLDER = "helium/exp_runner/data/experiments"
 DATASETS_FOLDER = "helium/exp_runner/data/datasets"
 DATASETS = [
+    "preprocessed_Breast Cancer Wisconsin (Original).csv",
+    # "preprocessed_MAGIC Gamma Telescope.csv",
+    # "preprocessed_TCGA.csv",
     # "preprocessed_Ionosphere.csv",
     # "preprocessed_Haberman's Survival.csv",
     # "preprocessed_Breast Cancer Wisconsin (Prognostic).csv",
     # "preprocessed_LTD.csv",
     # "preprocessed_Mammographic Mass.csv",
-    "preprocessed_Breast Cancer Wisconsin (Diagnostic).csv",
-    # "preprocessed_TCGA.csv",
-    # "preprocessed_MAGIC Gamma Telescope.csv",
+    # "preprocessed_Breast Cancer Wisconsin (Diagnostic).csv",
     # "preprocessed_Blood Transfusion Service Center.csv",
     # "preprocessed_Musk (Version 2).csv",
-    # "preprocessed_Breast Cancer Wisconsin (Original).csv",
     # "preprocessed_Spambase.csv",
 ]  # list all datasets that you want to use for the experiment, in runtime mode only one dataset is accepted
 # only run numerical datasets, categorical datasets are not supported yet
@@ -74,7 +74,7 @@ EXPERIMENT_FOLDER = os.path.join(
 
 N_SPLITS = 10  # Number of splits for the cross-validation with a StratifiedKFold
 FOLD_RANDOM_SEED = 0  # Random state for the StratifiedKFold
-NON_PARTICIPATION_PROB = [0.75]
+NON_PARTICIPATION_PROB = [0]
 
 
 def log(str, end="\n"):
@@ -327,7 +327,6 @@ for i, (exp, rep) in enumerate(product(exps_to_run, range(N_REP))):
                 )
 
                 time.sleep(5)  # lets the thing clean
-
                 exp_terminated = threading.Event()
 
                 def excepthook(args):
@@ -368,6 +367,11 @@ for i, (exp, rep) in enumerate(product(exps_to_run, range(N_REP))):
                             "actual_time_above_thresh",
                             churn_sim.time_above_threshold(thresh),
                         ),
+                        ("dataset", dataset),
+                        ("n_estimators", n_estimators),
+                        ("tree_depth", tree_depth),
+                        ("non_participation_prob", non_participation_prob),
+                        ("fold", N_FOLD),
                     ]
                 )
 
@@ -386,4 +390,4 @@ for i, (exp, rep) in enumerate(product(exps_to_run, range(N_REP))):
                 churn_sim.stop()
                 system.clean_all()
 
-            time.sleep(2)
+            time.sleep(300)

@@ -118,7 +118,7 @@ class DockerNodeSystem:
 
     def create_player(self, i):
         container_name = "node-%d" % i
-        cloud_host = "cloud" if self.cloud_host == 'localhost' else self.cloud_host
+        cloud_host = "cloud" if self.cloud_host == "localhost" else self.cloud_host
         cmd = (
             "./shape_traffic_and_start.sh -node_id node-%d -n_party %d -threshold %d -cloud_address %s -expRounds %d -nonParticipationProb %f"
             % (

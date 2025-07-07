@@ -1,4 +1,5 @@
 from pathlib import Path
+import subprocess
 import sys
 import time
 import re
@@ -288,17 +289,28 @@ for i, (exp, rep) in enumerate(product(exps_to_run, range(N_REP))):
                     ),
                 }
 
+                local_path = os.path.join(
+                    EXPERIMENTS_FOLDER,
+                    "experiment_config.json",
+                )
                 with open(
-                    os.path.join(
-                        EXPERIMENTS_FOLDER,
-                        "experiment_config.json",
-                    ),
+                    local_path,
                     "w",
                 ) as f:
                     json.dump(experiment_config, f)
 
                     f.flush()
                     os.fsync(f.fileno())
+
+                if PARTIES_HOST != CLOUD_HOST:
+                    remote_target = (
+                        f"{CLOUD_HOST}:{EXPERIMENTS_FOLDER}/experiment_config.json"
+                    )
+                    try:
+                        subprocess.run(["scp", local_path, remote_target], check=True)
+                        print("File successfully copied to remote host.")
+                    except subprocess.CalledProcessError as e:
+                        print(f"Error copying file to remote host: {e}")
 
                 time.sleep(1)
 

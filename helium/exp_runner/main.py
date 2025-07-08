@@ -1,4 +1,5 @@
 from pathlib import Path
+import shlex
 import subprocess
 import sys
 import time
@@ -16,7 +17,7 @@ from sklearn.model_selection import StratifiedKFold
 
 # ====== Environment ======
 PARTIES_HOST = 'localhost'     # parties should always be run on localhost
-CLOUD_HOST = 'localhost'  # hostname or ip of the cloud docker host
+CLOUD_HOST = "cx32"  # hostname or ip of the cloud docker host
 EPOCH_TIME = 1                 # time resolution of the failure process simulation
 START_WITH_THRESH = False # if true, starts with exactly the threshold number of nodes. Otherwise, starts with the expected number of node for the experiment's failure rate.
 EXP_SKIP_THRESH = 0.2 # experiments for which the expected time above threshold is below 20% are skipped
@@ -50,8 +51,8 @@ EXPERIMENTS_FOLDER = "helium/exp_runner/data/experiments"
 DATASETS_FOLDER = "helium/exp_runner/data/datasets"
 DATASETS = [
     "preprocessed_Breast Cancer Wisconsin (Original).csv",
-    # "preprocessed_MAGIC Gamma Telescope.csv",
-    # "preprocessed_TCGA.csv",
+    "preprocessed_MAGIC Gamma Telescope.csv",
+    "preprocessed_TCGA.csv",
     # "preprocessed_Ionosphere.csv",
     # "preprocessed_Haberman's Survival.csv",
     # "preprocessed_Breast Cancer Wisconsin (Prognostic).csv",
@@ -289,12 +290,13 @@ for i, (exp, rep) in enumerate(product(exps_to_run, range(N_REP))):
                     ),
                 }
 
-                local_path = os.path.join(
+                # Write experiment config locally and to remote host if present
+                local_config_path = os.path.join(
                     EXPERIMENTS_FOLDER,
                     "experiment_config.json",
                 )
                 with open(
-                    local_path,
+                    local_config_path,
                     "w",
                 ) as f:
                     json.dump(experiment_config, f)
@@ -302,19 +304,62 @@ for i, (exp, rep) in enumerate(product(exps_to_run, range(N_REP))):
                     f.flush()
                     os.fsync(f.fileno())
 
-                REMOTE_FOLDER = os.path.join(
-                    "sc", "home", "theresa.hradilak", "HE-CRF", EXPERIMENTS_FOLDER
-                )
-
                 if PARTIES_HOST != CLOUD_HOST:
-                    remote_target = (
-                        f"{CLOUD_HOST}:{REMOTE_FOLDER}/experiment_config.json"
+                    # Copy experiment config and attribute domains to remote host
+                    REMOTE_EXPERIMENT_FOLDER = os.path.join(
+                        "/",
+                        "sc",
+                        "home",
+                        "theresa.hradilak",
+                        "HE-CRF",
+                        EXPERIMENTS_FOLDER,
                     )
+
+                    REMOTE_DATASET_FOLDER = os.path.join(
+                        REMOTE_EXPERIMENT_FOLDER,
+                        EXPERIMENT_NAME,
+                        shlex.quote(dataset.split(".")[0]),
+                    )
+
+                    remote_config_target = f"{CLOUD_HOST}:{REMOTE_EXPERIMENT_FOLDER}/experiment_config.json"
                     try:
-                        subprocess.run(["scp", local_path, remote_target], check=True)
-                        print("File successfully copied to remote host.")
+                        subprocess.run(
+                            ["scp", local_config_path, remote_config_target], check=True
+                        )
                     except subprocess.CalledProcessError as e:
                         print(f"Error copying file to remote host: {e}")
+
+                    mk_data_dir_cmd = (
+                        f'ssh cx32 "mkdir -p {REMOTE_DATASET_FOLDER}/models"'
+                    )
+                    try:
+                        subprocess.run(mk_data_dir_cmd, shell=True, check=True)
+                    except subprocess.CalledProcessError as e:
+                        print(f"Error creating remote dataset directory: {e}")
+
+                    local_attribute_domains_path = os.path.join(
+                        ".",
+                        EXPERIMENT_FOLDER,
+                        dataset.split(".")[0],
+                        "attribute_domains.json",
+                    )
+                    remote_attribute_domains_target = (
+                        f"{CLOUD_HOST}:{REMOTE_DATASET_FOLDER}/attribute_domains.json"
+                    )
+
+                    try:
+                        subprocess.run(
+                            [
+                                "scp",
+                                local_attribute_domains_path,
+                                remote_attribute_domains_target,
+                            ],
+                            check=True,
+                        )
+                    except subprocess.CalledProcessError as e:
+                        print(
+                            f"Error copying attribute domains file to remote host: {e}"
+                        )
 
                 time.sleep(1)
 
@@ -406,4 +451,4 @@ for i, (exp, rep) in enumerate(product(exps_to_run, range(N_REP))):
                 churn_sim.stop()
                 system.clean_all()
 
-            time.sleep(300)
+            time.sleep(2 * n_party)  # wait for the containers to stop

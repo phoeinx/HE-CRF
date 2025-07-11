@@ -74,7 +74,7 @@ EXPERIMENT_FOLDER = os.path.join(
     EXPERIMENT_NAME,
 )  # folder where the experiment results are stored
 
-N_SPLITS = 10  # Number of splits for the cross-validation with a StratifiedKFold
+N_FOLDS = 10  # Number of splits for the cross-validation with a StratifiedKFold
 FOLD_RANDOM_SEED = 0  # Random state for the StratifiedKFold
 NON_PARTICIPATION_PROB = [0]
 
@@ -137,7 +137,7 @@ def setup_predictive_performance_data():
 
         # Create StratifiedKFolds of whole dataset
         folds = StratifiedKFold(
-            n_splits=N_SPLITS, shuffle=True, random_state=FOLD_RANDOM_SEED
+            n_splits=N_FOLDS, shuffle=True, random_state=FOLD_RANDOM_SEED
         )
         fold_folder = os.path.join(current_dataset_folder, "folds")
         os.makedirs(fold_folder, exist_ok=True)
@@ -161,9 +161,6 @@ def setup_predictive_performance_data():
 log("Computing experiments...")
 
 
-# if EXP_MODE == "predictive_performance":
-#     log("Predictive performance mode")
-#     log("Setting up predictive performance data")
 setup_predictive_performance_data()
 
 
@@ -206,8 +203,7 @@ for (
             non_participation_prob,
         )
     )
-log("%d experiments to run" % (len(exps_to_run)*N_REP))
-
+log("%d experiments to run" % (len(exps_to_run) * N_REP * N_FOLDS))
 for i, (exp, rep) in enumerate(product(exps_to_run, range(N_REP))):
 
     if i+1 < SKIP_TO:
@@ -229,7 +225,7 @@ for i, (exp, rep) in enumerate(product(exps_to_run, range(N_REP))):
             EXPERIMENT_FOLDER, dataset.split(".")[0], "party_data"
         )
         os.makedirs(party_data_folder, exist_ok=True)
-        for fold in range(N_SPLITS):
+        for fold in range(N_FOLDS):
             # make fold folder
             fold_folder = os.path.join(party_data_folder, f"fold_{fold}")
             os.makedirs(fold_folder, exist_ok=True)
@@ -262,7 +258,7 @@ for i, (exp, rep) in enumerate(product(exps_to_run, range(N_REP))):
     )
 
     for dataset_index, dataset in enumerate(DATASETS):
-        for N_FOLD in range(N_SPLITS):
+        for N_FOLD in range(N_FOLDS):
             # write out experiment_config
             try:
 

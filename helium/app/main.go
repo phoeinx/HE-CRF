@@ -377,18 +377,18 @@ func genConfigForNode(nid sessions.NodeID, nids []sessions.NodeID, threshold int
 		ObjectStoreConfig: objectstore.Config{BackendName: "mem"},
 		TLSConfig:         node.TLSConfig{InsecureChannels: true},
 		SetupConfig: setup.ServiceConfig{
-			Protocols: protocols.ExecutorConfig{MaxProtoPerNode: 3, MaxParticipation: 3, MaxAggregation: 1},
+			Protocols: protocols.ExecutorConfig{MaxProtoPerNode: 64, MaxParticipation: 64, MaxAggregation: 64},
 		},
 		ComputeConfig: compute.ServiceConfig{
-			MaxCircuitEvaluation: 10,
-			Protocols:            protocols.ExecutorConfig{MaxProtoPerNode: 32, MaxParticipation: 32, MaxAggregation: 32},
+			MaxCircuitEvaluation: 16,
+			Protocols:            protocols.ExecutorConfig{MaxProtoPerNode: 64, MaxParticipation: 64, MaxAggregation: 64},
 		},
 	}
 
 	if nid == "cloud" {
 		//nc.Address = node.Address(cloudAddress)
-		nc.SetupConfig.Protocols.MaxAggregation = 32
-		nc.ComputeConfig.Protocols.MaxAggregation = 32
+		nc.SetupConfig.Protocols.MaxAggregation = 64
+		nc.ComputeConfig.Protocols.MaxAggregation = 64
 	}
 	return
 }

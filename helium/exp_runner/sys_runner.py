@@ -92,9 +92,9 @@ class DockerNodeSystem:
             )
         )
         net = "expnet" if self.cloud_docker_host == self.parties_docker_host else "host"
-        # net = "host"
-        cpu_quota = 50000  # Half a CPU
-        memory_limit = "512m"
+        # # net = "host"
+        # cpu_quota = 50000  # Half a CPU
+        # memory_limit = "512m"
 
         # model output volume
         data_path = os.path.abspath("./helium/exp_runner/data")
@@ -105,8 +105,8 @@ class DockerNodeSystem:
             command=cmd,
             network=net,
             labels=[EXP_CONTAINER_LABEL],
-            cpu_quota=cpu_quota,
-            mem_limit=memory_limit,
+            # cpu_quota=cpu_quota,
+            # mem_limit=memory_limit,
             volumes={
                 data_path: {
                     "bind": "/helium/data",

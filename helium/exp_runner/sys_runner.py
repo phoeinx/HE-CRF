@@ -134,6 +134,7 @@ class DockerNodeSystem:
         net = "expnet"
         env = {"RATE_LIMIT": self.rate_limit, "DELAY": self.delay}
         data_path = os.path.abspath("./helium/exp_runner/data")
+        mem_limit = "4gb"
         container = self.parties_docker_host.containers.create(
             "exp:helium",
             name=container_name,
@@ -141,6 +142,7 @@ class DockerNodeSystem:
             entrypoint=cmd,
             cap_add=caps,
             network=net,
+            mem_limit=mem_limit,
             environment=env,
             labels=[EXP_CONTAINER_LABEL],
             detach=True,

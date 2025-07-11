@@ -37,9 +37,9 @@ SKIP_TO = 0  # starts from a specific experiment number in the grid
 EXP_MODE = "predictive_performance"  # "predictive_performance" or "runtime_performance"
 
 # ====== Experiment Grid ======
-N_PARTIES = [2, 5, 10, 50, 100, 250]
+N_PARTIES = [2, 5, 10, 50, 100, 200, 300]
 NUMBER_ESTIMATORS = [100]
-TREE_DEPTH = [3, 5, 7]
+TREE_DEPTH = [1, 3, 5]
 THRESH_VALUES = [1]  # the cryptographic threshold in percentage of the number of nodes
 FAILURE_RATES = [0]  # the failure rate in fail/min
 FAILURE_DURATIONS = [
@@ -163,6 +163,18 @@ log("Computing experiments...")
 
 setup_predictive_performance_data()
 
+for item in product(
+    TREE_DEPTH,
+    N_PARTIES,
+    THRESH_VALUES,
+    FAILURE_RATES,
+    FAILURE_DURATIONS,
+    NUMBER_ESTIMATORS,
+    NON_PARTICIPATION_PROB,
+):
+    print("Experiment parameters: %s" % str(item))
+
+sys.exit(0)
 
 exps_to_run = []
 for (
@@ -447,4 +459,4 @@ for i, (exp, rep) in enumerate(product(exps_to_run, range(N_REP))):
                 churn_sim.stop()
                 system.clean_all()
 
-            time.sleep(2 * n_party)  # wait for the containers to stop
+            time.sleep(min(n_party / 2, 2))  # wait for the containers to stop

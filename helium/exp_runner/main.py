@@ -163,19 +163,6 @@ log("Computing experiments...")
 
 setup_predictive_performance_data()
 
-for item in product(
-    TREE_DEPTH,
-    N_PARTIES,
-    THRESH_VALUES,
-    FAILURE_RATES,
-    FAILURE_DURATIONS,
-    NUMBER_ESTIMATORS,
-    NON_PARTICIPATION_PROB,
-):
-    print("Experiment parameters: %s" % str(item))
-
-sys.exit(0)
-
 exps_to_run = []
 for (
     n_party,
@@ -459,4 +446,4 @@ for i, (exp, rep) in enumerate(product(exps_to_run, range(N_REP))):
                 churn_sim.stop()
                 system.clean_all()
 
-            time.sleep(min(n_party / 2, 2))  # wait for the containers to stop
+            time.sleep(max(n_party / 2, 2))  # wait for the containers to stop

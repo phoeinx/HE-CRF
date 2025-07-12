@@ -39,7 +39,7 @@ EXP_MODE = "predictive_performance"  # "predictive_performance" or "runtime_perf
 # ====== Experiment Grid ======
 N_PARTIES = [2, 5, 10, 50, 100, 200, 300]
 NUMBER_ESTIMATORS = [100]
-TREE_DEPTH = [1, 3, 5]
+TREE_DEPTH = [3]
 THRESH_VALUES = [1]  # the cryptographic threshold in percentage of the number of nodes
 FAILURE_RATES = [0]  # the failure rate in fail/min
 FAILURE_DURATIONS = [
@@ -76,7 +76,7 @@ EXPERIMENT_FOLDER = os.path.join(
 
 N_FOLDS = 10  # Number of splits for the cross-validation with a StratifiedKFold
 FOLD_RANDOM_SEED = 0  # Random state for the StratifiedKFold
-NON_PARTICIPATION_PROB = [0]
+NON_PARTICIPATION_PROB = [0, 0.1, 0.2, 0.3, 0.5, 0.7, 0.9]
 
 
 def log(str, end="\n"):
